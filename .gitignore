@@ -1,0 +1,49 @@
+# Qt / qmake / CMake generated files
+build/
+build-*/
+cmake-build-*/
+debug/
+release/
+.qmake.stash
+.qmake.cache
+Makefile
+Makefile.*
+*.pro.user*
+*.creator.user*
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+ui_*.h
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+*.o
+*.obj
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.a
+*.lib
+*.qm
+# Local databases and credentials: version SQL scripts instead
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+.env
+.env.*
+!.env.example
+config/local.*
+# Editors / operating system
+.vscode/
+.idea/
+.vs/
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+# Generated release bundles
+/dist/
