@@ -47,3 +47,7 @@ Thumbs.db
 *.tmp
 # Generated release bundles
 /dist/
+
+# Exported library data
+/exports/
+借阅流水-*.csv
