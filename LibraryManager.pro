@@ -8,6 +8,7 @@ SOURCES += app/main.cpp \
            common/database.cpp \
            auth/authservice.cpp \
            books/bookservice.cpp \
+           common/paramservice.cpp \
            readers/readerservice.cpp \
            circulation/circulationservice.cpp \
            statistics/statisticsservice.cpp
@@ -15,6 +16,7 @@ HEADERS += app/mainwindow.h \
            common/database.h \
            auth/authservice.h \
            books/bookservice.h \
+           common/paramservice.h \
            readers/readerservice.h \
            circulation/circulationservice.h \
            statistics/statisticsservice.h
