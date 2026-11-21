@@ -1,6 +1,7 @@
 #include "paramservice.h"
 
 #include "../auth/authservice.h"
+#include "../auth/permissionservice.h"
 #include "database.h"
 
 #include <QDebug>
@@ -97,17 +98,8 @@ bool ParamService::setParam(const UserSession &session,
                             const QString &value,
                             QString *error)
 {
-    if (!session.isAuthenticated()) {
-        if (error) {
-            *error = QStringLiteral("请先登录");
-        }
-        return false;
-    }
-
-    if (!session.isAdmin()) {
-        if (error) {
-            *error = QStringLiteral("无权限");
-        }
+    if (!PermissionService::requirePermission(
+            session, Permission::ManageParams, error)) {
         return false;
     }
 

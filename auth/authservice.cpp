@@ -75,6 +75,7 @@ std::optional<UserSession> AuthService::login(const QString &username,
     session.username = query.value(1).toString();
     session.displayName = query.value(2).toString();
     session.role = query.value(5).toString();
+    session.permissions = PermissionService::permissionsForRole(session.role);
 
     if (error) {
         error->clear();

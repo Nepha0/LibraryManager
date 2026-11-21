@@ -1,5 +1,5 @@
 #pragma once
-
+#include "permissionservice.h"
 #include <QString>
 #include <optional>
 
@@ -9,6 +9,7 @@ struct UserSession
     QString username;
     QString displayName;
     QString role;
+    QVector<Permission> permissions;
 
     bool isAuthenticated() const
     {
@@ -36,6 +37,7 @@ struct UserSession
         username.clear();
         displayName.clear();
         role.clear();
+        permissions.clear();
     }
 };
 

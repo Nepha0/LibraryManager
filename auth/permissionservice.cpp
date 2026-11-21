@@ -49,10 +49,7 @@ bool PermissionService::hasPermission(
         return false;
     }
 
-    const QVector<Permission> permissions =
-        permissionsForRole(session.role);
-
-    return permissions.contains(permission);
+    return session.permissions.contains(permission);
 }
 
 bool PermissionService::requirePermission(
