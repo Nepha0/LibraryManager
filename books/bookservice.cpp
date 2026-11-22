@@ -2,7 +2,6 @@
 
 #include "../common/database.h"
 
-#include <QDateTime>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -16,10 +15,7 @@ bool BookService::addBook(const UserSession &session,
                           int copyCount,
                           QString *error)
 {
-    if (!session.isAdmin()) {
-        if (error) {
-            *error = QStringLiteral("只有管理员可以新增馆藏");
-        }
+    if (!PermissionService::requirePermission(session, Permission::ManageBooks, error)) {
         return false;
     }
     if (title.trimmed().isEmpty() || author.trimmed().isEmpty()
@@ -54,22 +50,29 @@ bool BookService::addBook(const UserSession &session,
 
     query.prepare(QStringLiteral(
         "INSERT INTO books("
-        "isbn, title, author, category_id, created_at) VALUES(?, ?, ?, ?, ?)"));
+        "isbn, title, author, category_id) VALUES(?, ?, ?, ?)"));
     query.addBindValue(isbn.trimmed());
     query.addBindValue(title.trimmed());
     query.addBindValue(author.trimmed());
     query.addBindValue(categoryId);
-    query.addBindValue(QDateTime::currentDateTime().toString(Qt::ISODate));
     if (!query.exec()) {
         database.rollback();
         if (error) {
-            *error = query.lastError().nativeErrorCode() == QStringLiteral("19")
+            *error = query.lastError().nativeErrorCode().contains(QStringLiteral("1062"))
                          ? QStringLiteral("该 ISBN 已存在")
                          : query.lastError().text();
         }
         return false;
     }
-    const qlonglong bookId = query.lastInsertId().toLongLong();
+    if (!query.exec(QStringLiteral("SELECT LAST_INSERT_ID()")) || !query.next()
+        || query.value(0).toLongLong() <= 0) {
+        if (error) {
+            *error = QStringLiteral("无法读取新增书目的编号：%1").arg(query.lastError().text());
+        }
+        database.rollback();
+        return false;
+    }
+    const qlonglong bookId = query.value(0).toLongLong();
 
     for (int index = 1; index <= copyCount; ++index) {
         query.prepare(QStringLiteral(
@@ -92,6 +95,7 @@ bool BookService::addBook(const UserSession &session,
         if (error) {
             *error = database.lastError().text();
         }
+        database.rollback();
         return false;
     }
     return true;

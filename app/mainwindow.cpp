@@ -104,11 +104,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent)
     statusBar()->showMessage(QStringLiteral("系统就绪"));
 }
 
-void MainWindow::openDemoSession()
+bool MainWindow::openDemoSession()
 {
     m_usernameEdit->setText(QStringLiteral("admin"));
     m_passwordEdit->setText(QStringLiteral("admin123"));
     handleLogin();
+    return m_rootStack->currentIndex() == 1;
 }
 
 QWidget *MainWindow::buildLoginPage()
@@ -141,7 +142,7 @@ QWidget *MainWindow::buildLoginPage()
     rule->setObjectName(QStringLiteral("titleRule"));
     rule->setFixedSize(56, 4);
     auto *note = makeLabel(
-        QStringLiteral("课程演示版 · Qt Widgets + SQLite"),
+        QStringLiteral("课程演示版 · Qt Widgets + MySQL"),
         QStringLiteral("loginNote"));
     introLayout->addWidget(eyebrow);
     introLayout->addSpacing(12);
@@ -435,7 +436,7 @@ QWidget *MainWindow::buildCirculationPage()
                                      QStringLiteral("panelTitle")));
     borrowTitle->addStretch();
     borrowTitle->addWidget(makeLabel(
-        QStringLiteral("默认借期以读者类型规则为准"),
+        QStringLiteral("借阅期限和上限以系统参数为准"),
         QStringLiteral("mutedText")));
     borrowLayout->addLayout(borrowTitle);
     auto *borrowRow = new QHBoxLayout;
@@ -498,12 +499,10 @@ QWidget *MainWindow::buildReadersPage()
     m_readerName->setPlaceholderText(QStringLiteral("姓名"));
     m_readerPhone = new QLineEdit;
     m_readerPhone->setPlaceholderText(QStringLiteral("手机号（可选）"));
-    m_readerType = new QComboBox;
     auto *addButton = makePrimaryButton(QStringLiteral("登记读者"));
     form->addWidget(m_readerNo, 2);
     form->addWidget(m_readerName, 2);
     form->addWidget(m_readerPhone, 2);
-    form->addWidget(m_readerType, 1);
     form->addWidget(addButton);
     formLayout->addLayout(form);
     layout->addWidget(formPanel);
@@ -515,7 +514,7 @@ QWidget *MainWindow::buildReadersPage()
                                        QStringLiteral("panelTitle")));
     m_readersTable = makeTable({
         QStringLiteral("读者编号"), QStringLiteral("姓名"),
-        QStringLiteral("联系电话"), QStringLiteral("类型"),
+        QStringLiteral("联系电话"),
         QStringLiteral("借阅中"), QStringLiteral("状态")
     });
     readersLayout->addWidget(m_readersTable);
@@ -585,12 +584,19 @@ void MainWindow::handleLogin()
         return;
     }
 
+    if (!session->isAdmin() && !session->isLibrarian()) {
+        m_loginError->setText(QStringLiteral("馆务工作台仅供管理员和馆员使用"));
+        return;
+    }
+
     m_session = *session;
     if (!m_pages) {
         m_rootStack->addWidget(buildShellPage());
     }
-    m_userLabel->setText(QStringLiteral("%1  ·  管理员")
-                             .arg(m_session.displayName));
+    m_userLabel->setText(QStringLiteral("%1  ·  %2")
+                             .arg(m_session.displayName,
+                                  m_session.isAdmin() ? QStringLiteral("管理员")
+                                                      : QStringLiteral("馆员")));
     m_rootStack->setCurrentIndex(1);
     m_navigation->setCurrentRow(0);
     m_passwordEdit->clear();
@@ -600,7 +606,7 @@ void MainWindow::handleLogin()
 
 void MainWindow::handleLogout()
 {
-    m_session = UserSession{};
+    AuthService::logout(m_session);
     m_usernameEdit->setText(QStringLiteral("admin"));
     m_passwordEdit->setText(QStringLiteral("admin123"));
     m_loginError->clear();
@@ -633,7 +639,7 @@ void MainWindow::addReader()
     QString error;
     if (!m_readerService.addReader(
             m_session, m_readerNo->text(), m_readerName->text(),
-            m_readerPhone->text(), m_readerType->currentText(), &error)) {
+            m_readerPhone->text(), &error)) {
         QMessageBox::warning(this, QStringLiteral("无法登记读者"), error);
         return;
     }
@@ -828,14 +834,6 @@ void MainWindow::refreshCirculation()
 void MainWindow::refreshReaders()
 {
     QString error;
-    const QString previousType = m_readerType->currentText();
-    m_readerType->clear();
-    m_readerType->addItems(m_readerService.readerTypes(&error));
-    const int typeIndex = m_readerType->findText(previousType);
-    if (typeIndex >= 0) {
-        m_readerType->setCurrentIndex(typeIndex);
-    }
-
     const auto readers = m_readerService.readers(&error);
     m_readersTable->setRowCount(readers.size());
     for (int row = 0; row < readers.size(); ++row) {
@@ -847,11 +845,9 @@ void MainWindow::refreshReaders()
         m_readersTable->setItem(
             row, 2, new QTableWidgetItem(reader.phone));
         m_readersTable->setItem(
-            row, 3, new QTableWidgetItem(reader.type));
+            row, 3, new QTableWidgetItem(QString::number(reader.activeLoans)));
         m_readersTable->setItem(
-            row, 4, new QTableWidgetItem(QString::number(reader.activeLoans)));
-        m_readersTable->setItem(
-            row, 5, new QTableWidgetItem(
+            row, 4, new QTableWidgetItem(
                          reader.enabled ? QStringLiteral("正常")
                                         : QStringLiteral("停用")));
     }

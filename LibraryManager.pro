@@ -5,16 +5,24 @@ TARGET = LibraryManager
 INCLUDEPATH += $$PWD
 SOURCES += app/main.cpp \
            app/mainwindow.cpp \
+           auth/permissionservice.cpp \
+           auth/userservice.cpp \
            common/database.cpp \
            auth/authservice.cpp \
            books/bookservice.cpp \
+           common/operationlogservice.cpp \
+           common/paramservice.cpp \
            readers/readerservice.cpp \
            circulation/circulationservice.cpp \
            statistics/statisticsservice.cpp
 HEADERS += app/mainwindow.h \
+           auth/permissionservice.h \
+           auth/userservice.h \
            common/database.h \
            auth/authservice.h \
            books/bookservice.h \
+           common/operationlogservice.h \
+           common/paramservice.h \
            readers/readerservice.h \
            circulation/circulationservice.h \
            statistics/statisticsservice.h

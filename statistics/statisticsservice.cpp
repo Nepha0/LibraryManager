@@ -29,7 +29,7 @@ DashboardStats StatisticsService::dashboard(QString *error) const
             "(SELECT COUNT(*) FROM loans WHERE returned_at IS NULL), "
             "(SELECT COUNT(*) FROM loans "
             " WHERE returned_at IS NULL "
-            " AND julianday(due_at) < julianday('now', 'localtime')), "
+            " AND due_at < CURRENT_TIMESTAMP), "
             "(SELECT COUNT(*) FROM readers WHERE active = 1)"))) {
         if (error) {
             *error = query.lastError().text();
@@ -74,11 +74,11 @@ StatisticsService::loanHistory(int limit, QString *error) const
         loan.copyCode = query.value(2).toString();
         loan.title = query.value(3).toString();
         loan.borrowedAt =
-            QDateTime::fromString(query.value(4).toString(), Qt::ISODate);
+            query.value(4).toDateTime();
         loan.dueAt =
-            QDateTime::fromString(query.value(5).toString(), Qt::ISODate);
+            query.value(5).toDateTime();
         loan.returnedAt =
-            QDateTime::fromString(query.value(6).toString(), Qt::ISODate);
+            query.value(6).toDateTime();
         result.append(loan);
     }
     return result;

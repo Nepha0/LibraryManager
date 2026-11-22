@@ -1,6 +1,6 @@
 # LibraryManager 图书管理系统
 
-四人课程项目。技术方案：C++17、Qt 6 Widgets、Qt SQL、SQLite；使用 qmake 构建。
+四人课程项目。技术方案：C++17、Qt 6 Widgets、Qt SQL、MySQL 8（通过 ODBC）；使用 qmake 构建。
 当前提供可运行的课程演示版，已经串通登录、馆藏入库、借书、还书、读者登记、
 统计查看和 CSV 导出。
 
@@ -8,16 +8,18 @@
 
 演示账号：`admin`，演示密码：`admin123`。
 
-1. 在 Qt Creator 中打开根目录 `LibraryManager.pro`。
-2. 选择 `Desktop Qt 6.12.0 MinGW 64-bit` Kit，使用独立构建目录。
-3. 点击构建和运行。
-4. 首次启动会创建本地 SQLite 数据库、虚构样书和演示读者。
-
-本机也可以只运行下面的命令重新构建并启动：
+1. 在本机 MySQL 创建 `library_manager`，字符集选 `utf8mb4`。
+2. 在 Windows 的 **ODBC 数据源（64 位）**配置 MySQL DSN，数据库选择 `library_manager`。本机的 DSN 名称是 `library_data`；团队成员可换成自己的 DSN 名称。
+3. 在项目根目录的 PowerShell 运行：
 
 ```powershell
-.\scripts\build-demo.ps1 -Run
+.\scripts\init-mysql.ps1 -Dsn library_data
+.\scripts\build-demo.ps1 -Dsn library_data -Run
 ```
+
+初始化脚本会创建所需表，并写入虚构样书、演示读者和默认登录账号。可以重复执行，已有同名记录不会被覆盖。DSN 可以提供 MySQL 登录信息；如果 DSN 没有提供登录信息，在启动程序和运行脚本的环境中设置 `LIBRARYMANAGER_DB_USER` 和 `LIBRARYMANAGER_DB_PASSWORD`。
+
+使用 Qt Creator 时，打开根目录的 `LibraryManager.pro`，选择 `Desktop Qt 6.12.0 MinGW 64-bit` Kit，在运行环境里添加 `LIBRARYMANAGER_DSN=library_data`。在 VS Code 中可直接用上面的命令；若按 F5，请在调试配置的环境变量中增加同一项。
 
 MSVC 套件需要对应的开发者命令行与 nmake/jom，不能混用 MinGW 编译器。
 如果 Qt 安装目录不同，通过 `-QtKit` 和 `-MingwBin` 参数传入实际路径。
@@ -34,10 +36,15 @@ MSVC 套件需要对应的开发者命令行与 nmake/jom，不能混用 MinGW �
 自动业务测试：
 
 ```powershell
-..\build-LibraryManager\release\LibraryManager.exe --smoke-test
+$env:LIBRARYMANAGER_DSN = 'library_data'
+.\scripts\init-mysql.ps1 -Smoke
+$p = Start-Process ..\build-LibraryManager\release\LibraryManager.exe -ArgumentList '--smoke-test' -Wait -PassThru
+$p.ExitCode
 ```
 
-该命令使用临时数据库，不会修改演示数据。
+退出码 `0` 表示通过。测试只写入独立的 `library_manager_smoke`，不会修改 `library_manager` 的演示数据。建测试库需要相应权限；测试账号须能访问测试库。
+
+当前界面提供馆务工作台。账号管理、参数修改和操作日志查询已有后端服务，可通过独立测试验证，尚未接入管理界面。
 
 ## 目录与责任
 
@@ -74,5 +81,4 @@ Git 不保存空目录，因此保留 `.gitkeep`；添加真实文件后可删�
 - [阶段计划](docs/ROADMAP.md)
 - [手工验收表](tests/ACCEPTANCE.md)
 
-不要将课程安装包、真实读者信息、密码或本地数据库提交到仓库。默认数据库位于
-当前用户的 Qt `AppDataLocation` 目录，数据库文件已被 `.gitignore` 排除。
+不要将课程安装包、真实读者信息、数据库凭据或数据库文件提交到仓库。新成员用迁移脚本建立自己的数据库。

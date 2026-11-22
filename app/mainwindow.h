@@ -21,7 +21,7 @@ class MainWindow : public QMainWindow
 {
 public:
     explicit MainWindow(QWidget *parent = nullptr);
-    void openDemoSession();
+    bool openDemoSession();
 
 private:
     QWidget *buildLoginPage();
@@ -87,7 +87,6 @@ private:
     QLineEdit *m_readerNo = nullptr;
     QLineEdit *m_readerName = nullptr;
     QLineEdit *m_readerPhone = nullptr;
-    QComboBox *m_readerType = nullptr;
     QTableWidget *m_readersTable = nullptr;
 
     QLabel *m_reportTitles = nullptr;
