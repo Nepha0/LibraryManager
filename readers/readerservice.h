@@ -3,7 +3,6 @@
 #include "../auth/authservice.h"
 
 #include <QString>
-#include <QStringList>
 #include <QVector>
 
 struct ReaderInfo
@@ -12,7 +11,6 @@ struct ReaderInfo
     QString readerNo;
     QString name;
     QString phone;
-    QString type;
     int activeLoans = 0;
     bool enabled = true;
 };
@@ -24,8 +22,6 @@ public:
                    const QString &readerNo,
                    const QString &name,
                    const QString &phone,
-                   const QString &type,
                    QString *error);
     QVector<ReaderInfo> readers(QString *error) const;
-    QStringList readerTypes(QString *error) const;
 };

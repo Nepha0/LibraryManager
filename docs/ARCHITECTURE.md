@@ -1,21 +1,22 @@
 # 数据库与模块约定草案
 
 本文件是当前演示版的数据库与模块约定。建表脚本位于
-`database/migrations/001_initial.sql`，运行时初始化代码位于
-`common/database.cpp`。
+`database/migrations/mysql/`，由 `scripts/init-mysql.ps1` 安装。运行时通过
+`common/database.cpp` 连接 MySQL。旧 SQLite 脚本只保留为历史参考。
 
 ## 数据模型
 
 | 表 | 职责 | 维护人 |
 |---|---|---|
 | users | 唯一账号、密码哈希、角色、状态 | A |
-| reader_types | 借阅数量、期限、续借规则 | D |
-| readers | 资料、关联账号和读者类别 | D |
+| system_params | 全局借阅数量、期限、续借规则 | A |
+| operation_logs | 账号及参数等关键操作记录 | A |
+| readers | 资料、关联账号和状态 | D |
 | categories | 图书分类 | B |
 | books | ISBN、书名、作者、出版社等书目信息 | B |
 | book_copies | 实体册编号、所属书目、状态 | B |
-| loans | 借阅人、实体册、借还时间、续借次数 | C |
-| reservations | 书目预约、排队和处理状态 | C |
+| loans | 借阅人、实体册、借还时间 | C |
+| reservations（待开发） | 书目预约、排队和处理状态 | C |
 
 同一书目可以对应多本实体书。借阅关联实体册，预约关联书目。
 借出、归还及预约分配必须保持借阅记录与实体书状态一致，由 C 的业务服务统一执行事务。
@@ -31,6 +32,6 @@ B 不能通过编辑界面将借出中的实体书直接改为可借；停用读
 
 接口名称、参数、返回类型和所有权由团队先确认，避免各写各的。
 SQL 使用 prepare/bindValue；不得拼接用户输入。密码仅保存哈希和盐，不保存明文。
-SQLite 每个连接启用外键，数据库放到 QStandardPaths::AppDataLocation。
+MySQL 使用 InnoDB 外键；主程序连接 `library_manager`，冒烟测试连接 `library_manager_smoke`。
 本地数据库不进 Git；`database/migrations/` 保存顺序执行的升级脚本，A 协调合并。
 每个成员有自己的开发数据库，演示数据使用虚构信息，脚本不能无提示删除已有数据。

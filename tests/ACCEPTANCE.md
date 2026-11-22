@@ -18,14 +18,16 @@
 
 ## 演示版自动检查
 
-在项目根目录运行以下命令，退出码为 0 表示登录、新增图书、借书、还书和统计
-查询全部通过：
+先构建程序，再初始化独立测试库。在项目根目录运行：
 
 ```powershell
-..\build-LibraryManager\release\LibraryManager.exe --smoke-test
+$env:LIBRARYMANAGER_DSN = 'library_data'
+.\scripts\init-mysql.ps1 -Smoke
+$p = Start-Process ..\build-LibraryManager\release\LibraryManager.exe -ArgumentList '--smoke-test' -Wait -PassThru
+$p.ExitCode
 ```
 
-自动化检查不能替代上面的界面验收和交叉测试。
+退出码为 `0` 表示登录、登记读者、新增图书、借还与统计检查通过。自动化检查不能替代上面的界面验收和交叉测试。
 
 ## 2026-11-06 演示版回归记录
 

@@ -32,7 +32,7 @@ int main(int argc, char *argv[])
     bool allPassed = true;
     QString error;
 
-    if (!Database::initialize(&error)) {
+    if (!Database::initializeSmokeTest(&error)) {
         qCritical().noquote()
         << "[FAIL] Qt 通过 QODBC 连接 MySQL：" << error;
         return 1;

@@ -1,5 +1,3 @@
-\USE library_manager;
-
 -- 1. 用户账号表
 CREATE TABLE IF NOT EXISTS users (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

@@ -14,9 +14,7 @@
 - 系统参数
 - 操作日志
 
-当前开发分支：
-
-    feature/core-reader-p0
+原 PR 分支：`feature/core-reader-p0`。本地集成分支：`integration/pr1-mysql`。
 
 ## 2. MySQL 数据库
 
@@ -41,26 +39,11 @@
 
 ## 3. ODBC 运行配置
 
-Qt 通过 `QODBC` 和 64 位系统 DSN 连接 MySQL。
+Qt 通过 `QODBC` 和 64 位用户或系统 DSN 连接 MySQL。DSN 指向 `library_manager`，Qt 套件需提供 `qsqlodbc.dll`。程序默认查找 `LibraryManagerDSN`；本机已配置的是 `library_data`，可通过 `LIBRARYMANAGER_DSN` 环境变量指定。
 
-DSN 名称：
+在项目根目录运行 `.\scripts\init-mysql.ps1 -Dsn library_data`。脚本依次运行 `001_backend_b.sql` 和 `002_demo_catalog.sql`，补齐馆藏和借还所需的表，并导入虚构演示数据。
 
-    LibraryManagerDSN
-
-本机要求：
-
-- 64 位 MySQL ODBC 8.0 Unicode Driver
-- 64 位系统 DSN
-- DSN 指向 `library_manager`
-- Qt 的 `qsqlodbc.dll` 可用
-
-运行程序前必须配置以下环境变量：
-
-    LIBRARYMANAGER_DB_USER=root
-    LIBRARYMANAGER_DB_PASSWORD=本机MySQL密码
-    LIBRARYMANAGER_DSN=LibraryManagerDSN
-
-禁止把数据库密码写入源码、迁移脚本或 Git 仓库。
+若 DSN 已提供登录信息，应用无需额外的账号环境变量。需要覆盖时，在启动环境中设置 `LIBRARYMANAGER_DB_USER` 和 `LIBRARYMANAGER_DB_PASSWORD`。数据库凭据不提交到仓库。
 
 ## 4. 已实现 Service
 
@@ -219,17 +202,7 @@ DSN 名称：
 
 ### 4.6 ReaderService
 
-当前正在开发。
-
-不依赖后端 C 的新增读者和编辑基本资料代码已在本地验证，但尚未形成可合并版本，因为现有前端仍在调用旧版“读者类别”接口。
-
-完整实现还依赖后端 C 提供：
-
-- `loans` 表最终字段
-- `reservations` 表最终字段
-- 当前借阅的判定方式
-- 逾期记录的判定方式
-- 有效预约状态枚举
+当前集成版支持登记读者、列出读者和查询当前借阅数。借书时检查读者是否停用及是否达到系统借阅额度。读者资料编辑、状态管理和预约资格仍待开发。
 
 ## 5. 后端 B 冒烟测试
 
@@ -243,7 +216,7 @@ Qt Creator 运行方法：
 
 1. 打开 `backend_b_smoke.pro`。
 2. 选择 `Desktop Qt 6.12.0 MinGW 64-bit` Kit。
-3. 在运行环境中配置数据库的三个环境变量。
+3. 在项目根目录运行 `.\scripts\init-mysql.ps1 -Dsn library_data -Smoke`，然后在 Qt Creator 运行环境中设置 `LIBRARYMANAGER_DSN=library_data`。测试只访问 `library_manager_smoke`。
 4. 执行 qmake。
 5. 构建并运行。
 6. 确认输出以 `Backend B smoke test passed.` 结束。
@@ -303,16 +276,9 @@ Qt Creator 运行方法：
 - 用户账号禁用限制
 - 读者完整详情
 
-## 7. 待前端确认的接口变化
+## 7. 前端接入状态
 
-新需求明确规定不设置读者类别，因此前端需要移除：
-
-- 读者类别输入框
-- 读者类别筛选
-- `readerTypes()` 调用
-- 带类别参数的旧版 `addReader()` 调用
-
-在前端完成切换前，主程序可能因旧接口调用而无法完整构建。后端 B 独立测试项目不受影响。
+主界面已采用不含读者类别的登记接口。新增馆藏、登记读者和借还采用统一的权限服务。借阅上限和期限从系统参数读取。账号管理、参数修改和日志查询目前仅提供后端接口。
 
 ## 8. 安全与协作约定
 

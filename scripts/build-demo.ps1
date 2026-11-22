@@ -1,6 +1,7 @@
 param(
     [string]$QtKit = "E:\Qt\6.12.0\mingw_64",
     [string]$MingwBin = "E:\Qt\Tools\mingw1310_64\bin",
+    [string]$Dsn,
     [switch]$Run
 )
 
@@ -39,6 +40,7 @@ try {
 
     Write-Host "Demo ready: $executable"
     if ($Run) {
+        if ($Dsn) { $env:LIBRARYMANAGER_DSN = $Dsn }
         Start-Process -FilePath $executable
     }
 }
