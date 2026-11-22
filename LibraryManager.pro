@@ -9,6 +9,7 @@ SOURCES += app/main.cpp \
            common/database.cpp \
            auth/authservice.cpp \
            books/bookservice.cpp \
+           common/operationlogservice.cpp \
            common/paramservice.cpp \
            readers/readerservice.cpp \
            circulation/circulationservice.cpp \
@@ -18,6 +19,7 @@ HEADERS += app/mainwindow.h \
            common/database.h \
            auth/authservice.h \
            books/bookservice.h \
+           common/operationlogservice.h \
            common/paramservice.h \
            readers/readerservice.h \
            circulation/circulationservice.h \

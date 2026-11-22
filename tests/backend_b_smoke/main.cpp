@@ -2,7 +2,7 @@
 #include "auth/permissionservice.h"
 #include "common/database.h"
 #include "common/paramservice.h"
-
+#include "common/operationlogservice.h"
 #include <QCoreApplication>
 #include <QDebug>
 #include <QStringList>
@@ -149,6 +149,59 @@ int main(int argc, char *argv[])
         qCritical().noquote()
             << "[FAIL] 无法读取原借阅上限：" << error;
     }
+
+    OperationLogService logService;
+    const QString smokeTargetId =
+        QString::number(
+            QDateTime::currentMSecsSinceEpoch());
+
+    const bool logRecorded = logService.record(
+        *admin,
+        QStringLiteral("BACKEND_B_SMOKE_TEST"),
+        QStringLiteral("system"),
+        smokeTargetId,
+        QStringLiteral("后端 B 冒烟测试日志"),
+        &error);
+
+    allPassed &= check(
+        logRecorded,
+        QStringLiteral("登录用户写入操作日志成功"));
+
+    OperationLogQuery readerLogQuery;
+    readerLogQuery.actionType =
+        QStringLiteral("BACKEND_B_SMOKE_TEST");
+
+    const OperationLogPage readerLogPage =
+        logService.listLogs(
+            readerSession, readerLogQuery, &error);
+
+    allPassed &= check(
+        readerLogPage.items.isEmpty()
+            && error == QStringLiteral("无权限"),
+        QStringLiteral("读者查询操作日志被拒绝"));
+
+    OperationLogQuery adminLogQuery;
+    adminLogQuery.actionType =
+        QStringLiteral("BACKEND_B_SMOKE_TEST");
+    adminLogQuery.page = 1;
+    adminLogQuery.pageSize = 20;
+
+    const OperationLogPage adminLogPage =
+        logService.listLogs(
+            *admin, adminLogQuery, &error);
+
+    bool foundSmokeLog = false;
+    for (const OperationLogInfo &item :
+         adminLogPage.items) {
+        if (item.targetId == smokeTargetId) {
+            foundSmokeLog = true;
+            break;
+        }
+    }
+
+    allPassed &= check(
+        foundSmokeLog,
+        QStringLiteral("管理员分页查询到操作日志"));
 
     UserSession logoutSession = *admin;
     AuthService::logout(logoutSession);
