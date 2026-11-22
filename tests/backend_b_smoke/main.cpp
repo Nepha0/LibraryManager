@@ -6,6 +6,8 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QStringList>
+#include <QSqlError>
+#include <QSqlQuery>
 
 namespace {
 
@@ -70,6 +72,83 @@ int main(int argc, char *argv[])
             && error == QStringLiteral("账号或密码错误"),
         QStringLiteral("错误密码被拒绝"));
 
+    const QString temporarySuffix =
+        QString::number(
+            QDateTime::currentMSecsSinceEpoch());
+
+    const QString missingUsername =
+        QStringLiteral("missing-user-%1")
+            .arg(temporarySuffix);
+
+    const auto missingUser = AuthService::login(
+        missingUsername,
+        QStringLiteral("any-password"),
+        &error);
+
+    allPassed &= check(
+        !missingUser.has_value()
+            && error == QStringLiteral("账号或密码错误"),
+        QStringLiteral("不存在账号使用统一错误提示"));
+
+    const QString disabledUsername =
+        QStringLiteral("disabled-user-%1")
+            .arg(temporarySuffix);
+    const QString disabledPassword =
+        QStringLiteral("disabled-test-password");
+    const QString disabledSalt =
+        QStringLiteral("disabled-test-salt");
+
+    QSqlQuery createDisabledUser(
+        Database::connection());
+    createDisabledUser.prepare(QStringLiteral(
+        "INSERT INTO users ("
+        "username, display_name, password_hash, "
+        "salt, role, active) "
+        "VALUES (?, ?, SHA2(CONCAT(?, ?), 256), "
+        "?, 'reader', 0)"));
+    createDisabledUser.addBindValue(disabledUsername);
+    createDisabledUser.addBindValue(
+        QStringLiteral("停用测试账号"));
+    createDisabledUser.addBindValue(disabledSalt);
+    createDisabledUser.addBindValue(disabledPassword);
+    createDisabledUser.addBindValue(disabledSalt);
+
+    const bool disabledUserCreated =
+        createDisabledUser.exec();
+
+    allPassed &= check(
+        disabledUserCreated,
+        QStringLiteral("创建临时停用账号"));
+
+    if (!disabledUserCreated) {
+        qCritical().noquote()
+        << "创建停用账号失败："
+        << createDisabledUser.lastError().text();
+    } else {
+        const auto disabledLogin = AuthService::login(
+            disabledUsername,
+            disabledPassword,
+            &error);
+
+        allPassed &= check(
+            !disabledLogin.has_value()
+                && error
+                       == QStringLiteral(
+                           "账号已停用，请联系管理员"),
+            QStringLiteral("停用账号登录被拒绝"));
+
+        QSqlQuery deleteDisabledUser(
+            Database::connection());
+        deleteDisabledUser.prepare(QStringLiteral(
+            "DELETE FROM users WHERE username = ?"));
+        deleteDisabledUser.addBindValue(
+            disabledUsername);
+
+        allPassed &= check(
+            deleteDisabledUser.exec(),
+            QStringLiteral("清理临时停用账号"));
+    }
+
     ParamService params;
     const QStringList integerKeys = {
         QStringLiteral("borrow_period_days"),
@@ -97,6 +176,111 @@ int main(int argc, char *argv[])
     readerSession.role = QStringLiteral("reader");
     readerSession.permissions =
         PermissionService::permissionsForRole(readerSession.role);
+    const QVector<Permission> allPermissions = {
+        Permission::ViewBooks,
+        Permission::ManageBooks,
+        Permission::ViewReaders,
+        Permission::ManageReaders,
+        Permission::ManageCirculation,
+        Permission::ManageUsers,
+        Permission::ManageParams,
+        Permission::ViewOperationLogs,
+        Permission::ViewPersonalCenter
+    };
+
+    bool adminHasAllPermissions = true;
+    for (Permission permission : allPermissions) {
+        if (!PermissionService::hasPermission(
+                *admin, permission)) {
+            adminHasAllPermissions = false;
+            break;
+        }
+    }
+
+    allPassed &= check(
+        adminHasAllPermissions,
+        QStringLiteral("管理员具有全部权限"));
+
+    UserSession librarianSession;
+    librarianSession.userId = 998;
+    librarianSession.username =
+        QStringLiteral("test-librarian");
+    librarianSession.displayName =
+        QStringLiteral("测试图书管理员");
+    librarianSession.role =
+        QStringLiteral("librarian");
+    librarianSession.permissions =
+        PermissionService::permissionsForRole(
+            librarianSession.role);
+
+    const bool librarianPermissionsCorrect =
+        PermissionService::hasPermission(
+            librarianSession,
+            Permission::ManageBooks)
+        && PermissionService::hasPermission(
+            librarianSession,
+            Permission::ManageReaders)
+        && PermissionService::hasPermission(
+            librarianSession,
+            Permission::ManageCirculation)
+        && !PermissionService::hasPermission(
+            librarianSession,
+            Permission::ManageUsers)
+        && !PermissionService::hasPermission(
+            librarianSession,
+            Permission::ManageParams)
+        && !PermissionService::hasPermission(
+            librarianSession,
+            Permission::ViewOperationLogs);
+
+    allPassed &= check(
+        librarianPermissionsCorrect,
+        QStringLiteral("图书管理员权限矩阵正确"));
+
+    const bool readerPermissionsCorrect =
+        PermissionService::hasPermission(
+            readerSession,
+            Permission::ViewBooks)
+        && PermissionService::hasPermission(
+            readerSession,
+            Permission::ViewPersonalCenter)
+        && !PermissionService::hasPermission(
+            readerSession,
+            Permission::ManageBooks)
+        && !PermissionService::hasPermission(
+            readerSession,
+            Permission::ManageReaders)
+        && !PermissionService::hasPermission(
+            readerSession,
+            Permission::ManageCirculation)
+        && !PermissionService::hasPermission(
+            readerSession,
+            Permission::ManageUsers)
+        && !PermissionService::hasPermission(
+            readerSession,
+            Permission::ManageParams)
+        && !PermissionService::hasPermission(
+            readerSession,
+            Permission::ViewOperationLogs);
+
+    allPassed &= check(
+        readerPermissionsCorrect,
+        QStringLiteral("读者权限矩阵正确"));
+
+    UserSession anonymousSession;
+    QString anonymousError;
+
+    const bool anonymousAllowed =
+        PermissionService::requirePermission(
+            anonymousSession,
+            Permission::ViewBooks,
+            &anonymousError);
+
+    allPassed &= check(
+        !anonymousAllowed
+            && anonymousError
+                   == QStringLiteral("请先登录"),
+        QStringLiteral("未登录用户调用受限操作被拒绝"));
 
     const bool readerChangedParam = params.setParam(
         readerSession,
