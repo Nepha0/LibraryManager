@@ -151,6 +151,31 @@ int main(int argc, char *argv[])
     }
 
     OperationLogService logService;
+    OperationLogQuery paramLogQuery;
+    paramLogQuery.actionType =
+        QStringLiteral("PARAM_UPDATE");
+    paramLogQuery.page = 1;
+    paramLogQuery.pageSize = 20;
+
+    const OperationLogPage paramLogPage =
+        logService.listLogs(
+            *admin, paramLogQuery, &error);
+
+    bool foundParamLog = false;
+    for (const OperationLogInfo &item :
+         paramLogPage.items) {
+        if (item.targetType
+                == QStringLiteral("system_param")
+            && item.targetId
+                   == QStringLiteral("borrow_limit")) {
+            foundParamLog = true;
+            break;
+        }
+    }
+
+    allPassed &= check(
+        foundParamLog,
+        QStringLiteral("参数修改自动写入操作日志"));
     const QString smokeTargetId =
         QString::number(
             QDateTime::currentMSecsSinceEpoch());
