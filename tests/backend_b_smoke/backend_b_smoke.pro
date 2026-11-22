@@ -14,10 +14,12 @@ SOURCES += main.cpp \
            ../../auth/authservice.cpp \
            ../../auth/permissionservice.cpp \
            ../../common/paramservice.cpp \
-           ../../common/operationlogservice.cpp
+           ../../common/operationlogservice.cpp \
+           ../../auth/userservice.cpp
 
 HEADERS += ../../common/database.h \
            ../../auth/authservice.h \
            ../../auth/permissionservice.h \
            ../../common/paramservice.h \
-           ../../common/operationlogservice.h
+           ../../common/operationlogservice.h \
+           ../../auth/userservice.h

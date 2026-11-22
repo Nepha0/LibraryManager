@@ -3,6 +3,8 @@
 #include "common/database.h"
 #include "common/paramservice.h"
 #include "common/operationlogservice.h"
+#include "auth/userservice.h"
+
 #include <QCoreApplication>
 #include <QDebug>
 #include <QStringList>
@@ -281,6 +283,203 @@ int main(int argc, char *argv[])
             && anonymousError
                    == QStringLiteral("请先登录"),
         QStringLiteral("未登录用户调用受限操作被拒绝"));
+
+    UserService userService;
+
+    const QString testUsername =
+        QStringLiteral("user-smoke-%1")
+            .arg(temporarySuffix);
+    const QString updatedUsername =
+        QStringLiteral("user-updated-%1")
+            .arg(temporarySuffix);
+    const QString testPassword =
+        QStringLiteral("initial-password");
+    const QString resetPassword =
+        QStringLiteral("reset-password");
+
+    const bool userCreated = userService.addUser(
+        *admin,
+        testUsername,
+        QStringLiteral("测试用户"),
+        testPassword,
+        QStringLiteral("reader"),
+        &error);
+
+    allPassed &= check(
+        userCreated,
+        QStringLiteral("管理员新增用户成功"));
+
+    const bool duplicateCreated =
+        userService.addUser(
+            *admin,
+            testUsername,
+            QStringLiteral("重复测试用户"),
+            testPassword,
+            QStringLiteral("reader"),
+            &error);
+
+    allPassed &= check(
+        !duplicateCreated
+            && error == QStringLiteral("账号已存在"),
+        QStringLiteral("重复账号被拒绝"));
+
+    const bool readerCreatedUser =
+        userService.addUser(
+            readerSession,
+            QStringLiteral("reader-attempt-%1")
+                .arg(temporarySuffix),
+            QStringLiteral("越权创建"),
+            testPassword,
+            QStringLiteral("reader"),
+            &error);
+
+    allPassed &= check(
+        !readerCreatedUser
+            && error == QStringLiteral("无权限"),
+        QStringLiteral("读者新增账号被拒绝"));
+
+    UserQuery userQuery;
+    userQuery.keyword = testUsername;
+    userQuery.page = 1;
+    userQuery.pageSize = 10;
+
+    const UserPage userPage =
+        userService.listUsers(
+            *admin, userQuery, &error);
+
+    qlonglong testUserId = 0;
+    for (const UserInfo &item : userPage.items) {
+        if (item.username == testUsername) {
+            testUserId = item.id;
+            break;
+        }
+    }
+
+    allPassed &= check(
+        testUserId > 0,
+        QStringLiteral("管理员分页查询到新增用户"));
+
+    const auto createdUser =
+        userService.getUser(
+            *admin, testUserId, &error);
+
+    allPassed &= check(
+        createdUser.has_value()
+            && createdUser->username == testUsername
+            && createdUser->role
+                   == QStringLiteral("reader")
+            && createdUser->enabled,
+        QStringLiteral("用户详情数据正确"));
+
+    const bool userUpdated =
+        userService.updateUser(
+            *admin,
+            testUserId,
+            updatedUsername,
+            QStringLiteral("更新后的测试用户"),
+            &error);
+
+    allPassed &= check(
+        userUpdated,
+        QStringLiteral("管理员编辑用户成功"));
+
+    const bool roleAssigned =
+        userService.assignRole(
+            *admin,
+            testUserId,
+            QStringLiteral("librarian"),
+            &error);
+
+    allPassed &= check(
+        roleAssigned,
+        QStringLiteral("管理员分配角色成功"));
+
+    const bool selfDemotionAllowed =
+        userService.assignRole(
+            *admin,
+            admin->userId,
+            QStringLiteral("reader"),
+            &error);
+
+    allPassed &= check(
+        !selfDemotionAllowed
+            && error
+                   == QStringLiteral(
+                       "不能取消当前登录账号的管理员角色"),
+        QStringLiteral("管理员不能取消自己的角色"));
+
+    const bool passwordReset =
+        userService.resetPassword(
+            *admin,
+            testUserId,
+            resetPassword,
+            &error);
+
+    allPassed &= check(
+        passwordReset,
+        QStringLiteral("管理员重置密码成功"));
+
+    const auto oldPasswordLogin =
+        AuthService::login(
+            updatedUsername,
+            testPassword,
+            &error);
+
+    allPassed &= check(
+        !oldPasswordLogin.has_value(),
+        QStringLiteral("旧密码在重置后失效"));
+
+    const auto resetPasswordLogin =
+        AuthService::login(
+            updatedUsername,
+            resetPassword,
+            &error);
+
+    allPassed &= check(
+        resetPasswordLogin.has_value()
+            && resetPasswordLogin->isLibrarian(),
+        QStringLiteral(
+            "新密码登录及新角色生效"));
+
+    OperationLogService userLogService;
+    OperationLogQuery userLogQuery;
+    userLogQuery.actionType =
+        QStringLiteral("USER_CREATE");
+    userLogQuery.page = 1;
+    userLogQuery.pageSize = 50;
+
+    const OperationLogPage userLogPage =
+        userLogService.listLogs(
+            *admin, userLogQuery, &error);
+
+    bool foundUserCreateLog = false;
+    for (const OperationLogInfo &item :
+         userLogPage.items) {
+        if (item.targetId
+            == QString::number(testUserId)) {
+            foundUserCreateLog = true;
+            break;
+        }
+    }
+
+    allPassed &= check(
+        foundUserCreateLog,
+        QStringLiteral("用户新增自动写入操作日志"));
+
+    QSqlQuery cleanupUser(Database::connection());
+    cleanupUser.prepare(QStringLiteral(
+        "DELETE FROM users "
+        "WHERE username = ? OR username = ?"));
+    cleanupUser.addBindValue(testUsername);
+    cleanupUser.addBindValue(updatedUsername);
+
+    const bool userCleaned =
+        cleanupUser.exec()
+        && cleanupUser.numRowsAffected() >= 1;
+
+    allPassed &= check(
+        userCleaned,
+        QStringLiteral("清理临时测试用户"));
 
     const bool readerChangedParam = params.setParam(
         readerSession,
