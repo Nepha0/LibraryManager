@@ -1,6 +1,7 @@
 #include "CopyService.h"
 #include <QSqlQuery>
 #include <QSqlError>
+#include "../database/DatabaseManager.h"
 
 namespace lib {
 
@@ -30,9 +31,9 @@ Result CopyService::fetchCopyRow(qint64 copyId, QVariantMap* out)
 {
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral(
-        "SELECT cp.id, cp.barcode, cp.book_id, b.title AS book_title, b.status AS book_status,"
+        "SELECT cp.id, cp.copy_code AS barcode, cp.book_id, b.title AS book_title, b.status AS book_status,"
         " cp.location, cp.status, cp.acquired_date"
-        " FROM copies cp LEFT JOIN books b ON b.id = cp.book_id WHERE cp.id = ?"));
+        " FROM book_copies cp LEFT JOIN books b ON b.id = cp.book_id WHERE cp.id = ?"));
     q.addBindValue(copyId);
     if (!q.exec() || !q.next())
         return Result::fail(ErrorCode::CopyNotFound,
@@ -57,7 +58,7 @@ Result CopyService::fetchCopyRow(qint64 copyId, QVariantMap* out)
 Result CopyService::fetchCopyByBarcode(const QString& barcode, QVariantMap* out)
 {
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("SELECT id FROM copies WHERE barcode = ?"));
+    q.prepare(QStringLiteral("SELECT id FROM book_copies WHERE copy_code = ?"));
     q.addBindValue(barcode);
     if (!q.exec() || !q.next())
         return Result::fail(ErrorCode::CopyNotFound,
@@ -86,13 +87,13 @@ Result CopyService::addCopy(const OperatorContext& op, qint64 bookId, const QStr
         return Result::fail(ErrorCode::ForeignKeyNotFound,
                             QStringLiteral("图书不存在（book_id=%1）").arg(bookId));
     const QString bookTitle = q.value(0).toString();
-    const bool shelved = q.value(1).toString() == QStringLiteral("SHELVED_OFF");
+    const bool shelved = q.value(1).toString() == QStringLiteral("shelved_off");
     if (shelved)
         return Result::fail(ErrorCode::BookShelvedOff,
                             QStringLiteral("该图书已下架，不能新增副本"));
 
     // 条码唯一校验
-    q.prepare(QStringLiteral("SELECT COUNT(*) FROM copies WHERE barcode = ?"));
+    q.prepare(QStringLiteral("SELECT COUNT(*) FROM book_copies WHERE copy_code = ?"));
     q.addBindValue(bc);
     if (!q.exec() || !q.next())
         return Result::fail(ErrorCode::DbError, QStringLiteral("条码查重失败"));
@@ -101,11 +102,13 @@ Result CopyService::addCopy(const OperatorContext& op, qint64 bookId, const QStr
                             QStringLiteral("条码 %1 已存在").arg(bc));
 
     q.prepare(QStringLiteral(
-        "INSERT INTO copies (barcode, book_id, location, status, acquired_date)"
-        " VALUES (?, ?, ?, 'AVAILABLE', ?)"));
+        "INSERT INTO book_copies (copy_code, book_id, location, status, acquired_date)"
+        " VALUES (?, ?, ?, 'available', ?)"));
     q.addBindValue(bc);
     q.addBindValue(bookId);
-    q.addBindValue(location.trimmed());
+    // location 列 NOT NULL DEFAULT ''：空入参必须写空串而非 NULL（空 QVariant 会被 SQLite 存成 NULL）
+    const QString loc = location.trimmed();
+    q.addBindValue(loc.isEmpty() ? QVariant(QStringLiteral("")) : QVariant(loc));
     q.addBindValue(acquiredDate.isValid()
                        ? QVariant(acquiredDate.toString(QStringLiteral("yyyy-MM-dd")))
                        : QVariant(QString()));
@@ -154,9 +157,9 @@ Result CopyService::updateCopy(const OperatorContext& op, qint64 copyId, const Q
         return Result::fail(ErrorCode::InvalidCondition,
                             QStringLiteral("未提供任何可更新的字段（仅支持 location / acquired_date）"));
 
-    sets << QStringLiteral("updated_at = datetime('now','localtime')");
+    sets << QStringLiteral("updated_at = ") + DatabaseManager::instance().nowExpr();
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("UPDATE copies SET %1 WHERE id = %2")
+    q.prepare(QStringLiteral("UPDATE book_copies SET %1 WHERE id = %2")
                   .arg(sets.join(QStringLiteral(", "))).arg(copyId));
     for (const QVariant& b : binds) q.addBindValue(b);
     if (!q.exec())
@@ -205,15 +208,15 @@ Result CopyService::changeCopyStatus(const OperatorContext& op, qint64 copyId, c
 
     // 3) 下架图书不可再借出（防御校验，借阅流程为 C 板块）
     if (to == CopyStatus::Borrowed
-        && existing.value(QStringLiteral("book_status")).toString() == QStringLiteral("SHELVED_OFF"))
+        && existing.value(QStringLiteral("book_status")).toString() == QStringLiteral("shelved_off"))
         return Result::fail(ErrorCode::BookShelvedOff,
                             QStringLiteral("该图书已下架，不可再借出"));
 
     // 4) 乐观锁更新：WHERE 带上当前状态，防止并发下状态漂移
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
-        "UPDATE copies SET status = ?, updated_at = datetime('now','localtime')"
-        " WHERE id = ? AND status = ?"));
+    q.prepare(QStringLiteral("UPDATE book_copies SET status = ?, updated_at = ")
+                  + DatabaseManager::instance().nowExpr()
+                  + QStringLiteral(" WHERE id = ? AND status = ?"));
     q.addBindValue(toName);
     q.addBindValue(copyId);
     q.addBindValue(fromName);
@@ -252,15 +255,15 @@ Result CopyService::listCopies(const OperatorContext& op, const QVariantMap& fil
             binds << bid;
         }
     }
-    const QString status = filter.value(QStringLiteral("status")).toString().trimmed().toUpper();
+    const QString status = filter.value(QStringLiteral("status")).toString().trimmed();
     if (!status.isEmpty()) {
         bool ok = false;
-        copyStatusFromString(status, &ok);
+        const CopyStatus cs = copyStatusFromString(status, &ok);
         if (!ok)
             return Result::fail(ErrorCode::InvalidCondition,
                                 QStringLiteral("未知的副本状态：%1").arg(status));
         where << QStringLiteral("cp.status = ?");
-        binds << status;
+        binds << copyStatusToString(cs);   // 库内存小写，绑定值须规范化
     }
     const QString loc = filter.value(QStringLiteral("location")).toString().trimmed();
     if (!loc.isEmpty()) {
@@ -269,14 +272,14 @@ Result CopyService::listCopies(const OperatorContext& op, const QVariantMap& fil
     }
     const QString bc = filter.value(QStringLiteral("barcode")).toString().trimmed();
     if (!bc.isEmpty()) {
-        where << QStringLiteral("cp.barcode LIKE ?");
+        where << QStringLiteral("cp.copy_code LIKE ?");
         binds << QStringLiteral("%%1%").arg(bc);
     }
     const QString whereSql =
         where.isEmpty() ? QString() : QStringLiteral(" WHERE ") + where.join(QStringLiteral(" AND "));
 
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("SELECT COUNT(*) FROM copies cp%1").arg(whereSql));
+    q.prepare(QStringLiteral("SELECT COUNT(*) FROM book_copies cp%1").arg(whereSql));
     for (const QVariant& b : binds) q.addBindValue(b);
     if (!q.exec() || !q.next())
         return Result::fail(ErrorCode::DbError,
@@ -285,9 +288,9 @@ Result CopyService::listCopies(const OperatorContext& op, const QVariantMap& fil
     r.total = q.value(0).toInt();
 
     q.prepare(QStringLiteral(
-        "SELECT cp.id, cp.barcode, cp.book_id, b.title AS book_title, cp.location,"
+        "SELECT cp.id, cp.copy_code AS barcode, cp.book_id, b.title AS book_title, cp.location,"
         " cp.status, cp.acquired_date"
-        " FROM copies cp LEFT JOIN books b ON b.id = cp.book_id%1"
+        " FROM book_copies cp LEFT JOIN books b ON b.id = cp.book_id%1"
         " ORDER BY cp.id LIMIT %2 OFFSET %3")
         .arg(whereSql).arg(pageSize).arg((page - 1) * pageSize));
     for (const QVariant& b : binds) q.addBindValue(b);
@@ -313,7 +316,7 @@ Result CopyService::listCopies(const OperatorContext& op, const QVariantMap& fil
     if (filter.contains(QStringLiteral("book_id")) && !filter.value(QStringLiteral("book_id")).isNull()) {
         QSqlQuery s(m_db);
         s.prepare(QStringLiteral(
-            "SELECT status, COUNT(*) FROM copies WHERE book_id = ? GROUP BY status"));
+            "SELECT status, COUNT(*) FROM book_copies WHERE book_id = ? GROUP BY status"));
         s.addBindValue(filter.value(QStringLiteral("book_id")));
         s.exec();
         QVariantMap stats;
@@ -349,7 +352,7 @@ Result CopyService::copyStatistics(const OperatorContext& op, qint64 bookId)
                             QStringLiteral("图书不存在（book_id=%1）").arg(bookId));
 
     q.prepare(QStringLiteral(
-        "SELECT status, COUNT(*) FROM copies WHERE book_id = ? GROUP BY status"));
+        "SELECT status, COUNT(*) FROM book_copies WHERE book_id = ? GROUP BY status"));
     q.addBindValue(bookId);
     q.exec();
     QVariantMap stats;

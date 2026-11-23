@@ -5,6 +5,7 @@
 #include <QTextStream>
 #include <QSet>
 #include <QSqlQuery>
+#include "../database/DatabaseManager.h"
 #include <QSqlError>
 #include <QDate>
 #include <QHash>
@@ -222,7 +223,7 @@ Result ImportExportService::importCsv(const OperatorContext& op, const QString& 
             }
             const qint64 categoryId = q.value(0).toLongLong();
             // ISBN 在库重复（ACTIVE 范围）
-            q.prepare(QStringLiteral("SELECT COUNT(*) FROM books WHERE isbn = ? AND status = 'ACTIVE'"));
+            q.prepare(QStringLiteral("SELECT COUNT(*) FROM books WHERE isbn = ?"));
             q.addBindValue(isbn);
             if (!q.exec() || !q.next()) {
                 m_db.rollback();
@@ -238,7 +239,7 @@ Result ImportExportService::importCsv(const OperatorContext& op, const QString& 
             q.prepare(QStringLiteral(
                 "INSERT INTO books (isbn, title, author, publisher, publish_date,"
                 " category_id, intro, cover_path, status)"
-                " VALUES (?,?,?,?,?,?,?,?,'ACTIVE')"));
+                " VALUES (?,?,?,?,?,?,?,?,'active')"));
             q.addBindValue(isbn);
             q.addBindValue(title);
             q.addBindValue(cell(QStringLiteral("作者")));
@@ -290,14 +291,14 @@ Result ImportExportService::importCsv(const OperatorContext& op, const QString& 
                                           QStringLiteral("ISBN %1 对应图书不存在").arg(isbn) } };
                 continue;
             }
-            if (q.value(QStringLiteral("status")).toString() == QStringLiteral("SHELVED_OFF")) {
+            if (q.value(QStringLiteral("status")).toString() == QStringLiteral("shelved_off")) {
                 r.list << QVariantMap { { QStringLiteral("row"), rowNo },
                                         { QStringLiteral("reason"),
                                           QStringLiteral("ISBN %1 对应图书已下架").arg(isbn) } };
                 continue;
             }
             const qint64 bookId = q.value(0).toLongLong();
-            q.prepare(QStringLiteral("SELECT COUNT(*) FROM copies WHERE barcode = ?"));
+            q.prepare(QStringLiteral("SELECT COUNT(*) FROM book_copies WHERE copy_code = ?"));
             q.addBindValue(barcode);
             if (!q.exec() || !q.next()) {
                 m_db.rollback();
@@ -310,8 +311,8 @@ Result ImportExportService::importCsv(const OperatorContext& op, const QString& 
                 continue;
             }
             q.prepare(QStringLiteral(
-                "INSERT INTO copies (barcode, book_id, location, status, acquired_date)"
-                " VALUES (?,?,?,'AVAILABLE',?)"));
+                "INSERT INTO book_copies (copy_code, book_id, location, status, acquired_date)"
+                " VALUES (?,?,?,'available',?)"));
             q.addBindValue(barcode);
             q.addBindValue(bookId);
             q.addBindValue(cell(QStringLiteral("馆藏位置")));
@@ -410,7 +411,7 @@ Result ImportExportService::importXlsx(const OperatorContext& op, const QString&
                 continue;
             }
             const qint64 categoryId = q.value(0).toLongLong();
-            q.prepare(QStringLiteral("SELECT COUNT(*) FROM books WHERE isbn = ? AND status = 'ACTIVE'"));
+            q.prepare(QStringLiteral("SELECT COUNT(*) FROM books WHERE isbn = ?"));
             q.addBindValue(isbn);
             if (!q.exec() || !q.next()) { m_db.rollback(); return Result::fail(ErrorCode::DbError, QStringLiteral("ISBN 查重失败")); }
             if (q.value(0).toInt() > 0) {
@@ -420,7 +421,7 @@ Result ImportExportService::importXlsx(const OperatorContext& op, const QString&
             }
             q.prepare(QStringLiteral(
                 "INSERT INTO books (isbn, title, author, publisher, publish_date,"
-                " category_id, intro, cover_path, status) VALUES (?,?,?,?,?,?,?,?,'ACTIVE')"));
+                " category_id, intro, cover_path, status) VALUES (?,?,?,?,?,?,?,?,'active')"));
             q.addBindValue(isbn);
             q.addBindValue(title);
             q.addBindValue(cell(QStringLiteral("作者")));
@@ -453,13 +454,13 @@ Result ImportExportService::importXlsx(const OperatorContext& op, const QString&
                                         { "reason", QStringLiteral("ISBN %1 对应图书不存在").arg(isbn) } };
                 continue;
             }
-            if (q.value(QStringLiteral("status")).toString() == QStringLiteral("SHELVED_OFF")) {
+            if (q.value(QStringLiteral("status")).toString() == QStringLiteral("shelved_off")) {
                 r.list << QVariantMap { { "row", rowNo },
                                         { "reason", QStringLiteral("ISBN %1 对应图书已下架").arg(isbn) } };
                 continue;
             }
             const qint64 bookId = q.value(0).toLongLong();
-            q.prepare(QStringLiteral("SELECT COUNT(*) FROM copies WHERE barcode = ?"));
+            q.prepare(QStringLiteral("SELECT COUNT(*) FROM book_copies WHERE copy_code = ?"));
             q.addBindValue(barcode);
             if (!q.exec() || !q.next()) { m_db.rollback(); return Result::fail(ErrorCode::DbError, QStringLiteral("条码查重失败")); }
             if (q.value(0).toInt() > 0) {
@@ -468,8 +469,8 @@ Result ImportExportService::importXlsx(const OperatorContext& op, const QString&
                 continue;
             }
             q.prepare(QStringLiteral(
-                "INSERT INTO copies (barcode, book_id, location, status, acquired_date)"
-                " VALUES (?,?,?,'AVAILABLE',?)"));
+                "INSERT INTO book_copies (copy_code, book_id, location, status, acquired_date)"
+                " VALUES (?,?,?,'available',?)"));
             q.addBindValue(barcode);
             q.addBindValue(bookId);
             q.addBindValue(cell(QStringLiteral("馆藏位置")));
@@ -586,8 +587,8 @@ Result ImportExportService::exportBooks(const OperatorContext& op, const QString
         q.prepare(QStringLiteral(
             "SELECT b.isbn, b.title, b.author, b.publisher, b.publish_date, c.name AS category_name,"
             " b.intro, b.cover_path, b.status,"
-            " (SELECT COUNT(*) FROM copies cp WHERE cp.book_id = b.id) AS copy_total,"
-            " (SELECT COUNT(*) FROM copies cp WHERE cp.book_id = b.id AND cp.status = 'AVAILABLE') AS available_count"
+            " (SELECT COUNT(*) FROM book_copies cp WHERE cp.book_id = b.id) AS copy_total,"
+            " (SELECT COUNT(*) FROM book_copies cp WHERE cp.book_id = b.id AND cp.status = 'available') AS available_count"
             " FROM books b LEFT JOIN categories c ON c.id = b.category_id"
             " ORDER BY b.id LIMIT %1 OFFSET %2").arg(kExportBatchSize).arg(offset));
         if (!q.exec())
@@ -666,8 +667,8 @@ Result ImportExportService::exportCopies(const OperatorContext& op, const QStrin
     while (true) {
         QSqlQuery q(m_db);
         q.prepare(QStringLiteral(
-            "SELECT cp.barcode, b.isbn, b.title AS book_title, cp.location, cp.status, cp.acquired_date"
-            " FROM copies cp LEFT JOIN books b ON b.id = cp.book_id"
+            "SELECT cp.copy_code AS barcode, b.isbn, b.title AS book_title, cp.location, cp.status, cp.acquired_date"
+            " FROM book_copies cp LEFT JOIN books b ON b.id = cp.book_id"
             " ORDER BY cp.id LIMIT %1 OFFSET %2").arg(kExportBatchSize).arg(offset));
         if (!q.exec())
             return Result::fail(ErrorCode::DbError,

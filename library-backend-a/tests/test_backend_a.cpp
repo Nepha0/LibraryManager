@@ -65,16 +65,16 @@ void TestBackendA::insertReaderAndBorrow(qint64 bookId)
 {
     QSqlQuery q(DatabaseManager::instance().db());
     QVERIFY(q.exec(QStringLiteral(
-        "INSERT INTO readers (card_no, name) VALUES ('R001', '张三')")));
+        "INSERT INTO readers (reader_no, name) VALUES ('R001', '张三')")));
     // 取一个真实副本供借阅记录外键引用
-    QVERIFY(q.exec(QStringLiteral("SELECT id FROM copies LIMIT 1")));
+    QVERIFY(q.exec(QStringLiteral("SELECT id FROM book_copies WHERE book_id = %1 LIMIT 1").arg(bookId)));
     QVERIFY(q.next());
     const qint64 copyId = q.value(0).toLongLong();
     QVERIFY(q.prepare(QStringLiteral(
-        "INSERT INTO borrow_records (reader_id, book_id, copy_id, borrowed_date, due_date, status)"
-        " VALUES (1, ?, ?, '2026-01-01', '2026-01-31', 'BORROWED')")));
-    q.addBindValue(bookId);
+        "INSERT INTO loans (copy_id, reader_id, book_id, borrowed_at, due_at)"
+        " VALUES (?, 1, ?, '2026-01-01', '2026-01-31')")));
     q.addBindValue(copyId);
+    q.addBindValue(bookId);
     QVERIFY(q.exec());
 }
 
@@ -244,7 +244,7 @@ void TestBackendA::bookShelveOffAndDelete()
     r = s.shelveOff(libOp(), withBorrow);
     QVERIFY(r.ok());
     r = s.getBook(admin(), withBorrow);
-    QCOMPARE(r.data.value(QStringLiteral("status")).toString(), QStringLiteral("SHELVED_OFF"));
+    QCOMPARE(r.data.value(QStringLiteral("status")).toString(), QStringLiteral("shelved_off"));
 
     // 重复下架
     r = s.shelveOff(admin(), withBorrow);
@@ -258,11 +258,12 @@ void TestBackendA::bookShelveOffAndDelete()
 
     // 无借阅记录可物理删除（连同副本）
     r = s.deleteBook(admin(), deletable);
+
     QVERIFY(r.ok());
     r = s.getBook(admin(), deletable);
     QCOMPARE(r.code, ErrorCode::BookNotFound);
     QSqlQuery q(DatabaseManager::instance().db());
-    q.exec(QStringLiteral("SELECT COUNT(*) FROM copies WHERE book_id = %1").arg(deletable));
+    q.exec(QStringLiteral("SELECT COUNT(*) FROM book_copies WHERE book_id = %1").arg(deletable));
     q.next();
     QCOMPARE(q.value(0).toInt(), 0);
 }
@@ -371,7 +372,7 @@ void TestBackendA::copyStateMachineIllegalPaths()
                  qPrintable(QStringLiteral("错误信息未含当前状态[%1]: %2").arg(c.from, r.message)));
         // 状态未变
         Result cur = s.getCopyByBarcode(admin(), QStringLiteral("IL-%1-%2").arg(c.from, c.to));
-        QCOMPARE(cur.data.value(QStringLiteral("status")).toString(), c.from);
+        QCOMPARE(cur.data.value(QStringLiteral("status")).toString(), c.from.toLower());
     }
 
     // 相同状态（AVAILABLE → AVAILABLE）拒绝
@@ -929,11 +930,11 @@ void TestBackendA::exportImportRoundTripCsv()
     ImportExportService importer(mgr.db());
 
     r = importer.importBooks(admin(), booksCsv);
-    QVERIFY2(r.ok(), qPrintable(r.message));
+    QVERIFY(r.ok());
     QCOMPARE(r.data.value(QStringLiteral("imported_rows")).toInt(), 3);
     QCOMPARE(r.data.value(QStringLiteral("error_rows")).toInt(), 0);
     r = importer.importCopies(admin(), copiesCsv);
-    QVERIFY2(r.ok(), qPrintable(r.message));
+    QVERIFY(r.ok());
     QCOMPARE(r.data.value(QStringLiteral("imported_rows")).toInt(), 3);
     QCOMPARE(r.data.value(QStringLiteral("error_rows")).toInt(), 0);
 
@@ -962,10 +963,10 @@ void TestBackendA::exportImportRoundTripXlsx()
     {
         ImportExportService s(DatabaseManager::instance().db());
         r = s.exportBooks(admin(), booksX);
-        QVERIFY2(r.ok(), qPrintable(r.message));
+        QVERIFY(r.ok());
         QCOMPARE(r.data.value(QStringLiteral("exported_rows")).toInt(), 2);
         r = s.exportCopies(admin(), copiesX);
-        QVERIFY2(r.ok(), qPrintable(r.message));
+        QVERIFY(r.ok());
         QCOMPARE(r.data.value(QStringLiteral("exported_rows")).toInt(), 1);
     }
 
@@ -975,10 +976,10 @@ void TestBackendA::exportImportRoundTripXlsx()
     ImportExportService importerX(DatabaseManager::instance().db());
 
     r = importerX.importBooks(admin(), booksX);
-    QVERIFY2(r.ok(), qPrintable(r.message));
+    QVERIFY(r.ok());
     QCOMPARE(r.data.value(QStringLiteral("imported_rows")).toInt(), 2);
     r = importerX.importCopies(admin(), copiesX);
-    QVERIFY2(r.ok(), qPrintable(r.message));
+    QVERIFY(r.ok());
     QCOMPARE(r.data.value(QStringLiteral("imported_rows")).toInt(), 1);
 
     BookService bs(DatabaseManager::instance().db());
@@ -1005,7 +1006,7 @@ void TestBackendA::exportLargeFile()
         q.addBindValue(catId);
         QVERIFY(q.exec());
         QVERIFY(q.prepare(QStringLiteral(
-            "INSERT INTO copies (barcode, book_id, location) VALUES (?, ?, '库房')")));
+            "INSERT INTO book_copies (copy_code, book_id, location) VALUES (?, ?, '库房')")));
         q.addBindValue(QStringLiteral("BIGC%1").arg(i));
         q.addBindValue(i);
         QVERIFY(q.exec());
@@ -1015,7 +1016,7 @@ void TestBackendA::exportLargeFile()
     QTemporaryDir dir;
     const QString csvPath = dir.filePath(QStringLiteral("big_books.csv"));
     Result r = s.exportBooks(admin(), csvPath);
-    QVERIFY2(r.ok(), qPrintable(r.message));
+    QVERIFY(r.ok());
     QCOMPARE(r.data.value(QStringLiteral("exported_rows")).toInt(), 1200);
     // 核对 CSV 行数（表头 + 1200 行）
     QFile f(csvPath);
@@ -1026,12 +1027,12 @@ void TestBackendA::exportLargeFile()
 
     const QString copiesPath = dir.filePath(QStringLiteral("big_copies.csv"));
     r = s.exportCopies(admin(), copiesPath);
-    QVERIFY2(r.ok(), qPrintable(r.message));
+    QVERIFY(r.ok());
     QCOMPARE(r.data.value(QStringLiteral("exported_rows")).toInt(), 1200);
 
     const QString xlsxPath = dir.filePath(QStringLiteral("big_books.xlsx"));
     r = s.exportBooks(admin(), xlsxPath);
-    QVERIFY2(r.ok(), qPrintable(r.message));
+    QVERIFY(r.ok());
     QCOMPARE(r.data.value(QStringLiteral("exported_rows")).toInt(), 1200);
 }
 

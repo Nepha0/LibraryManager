@@ -2,6 +2,7 @@
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QDate>
+#include "../database/DatabaseManager.h"
 
 namespace lib {
 
@@ -75,7 +76,7 @@ Result BookService::validateFields(const QVariantMap& fields, bool forCreate,
     if (out.contains(QStringLiteral("isbn"))) {
         QSqlQuery q(m_db);
         QString sql = QStringLiteral(
-            "SELECT COUNT(*) FROM books WHERE isbn = ? AND status = 'ACTIVE'");
+            "SELECT COUNT(*) FROM books WHERE isbn = ?");
         if (excludeBookId > 0)
             sql += QStringLiteral(" AND id <> %1").arg(excludeBookId);
         q.prepare(sql);
@@ -109,7 +110,7 @@ Result BookService::addBook(const OperatorContext& op, const QVariantMap& fields
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral(
         "INSERT INTO books (isbn, title, author, publisher, publish_date, category_id,"
-        " intro, cover_path, status) VALUES (?,?,?,?,?,?,?,?, 'ACTIVE')"));
+        " intro, cover_path, status) VALUES (?,?,?,?,?,?,?,?, 'active')"));
     q.addBindValue(norm.value(QStringLiteral("isbn")));
     q.addBindValue(norm.value(QStringLiteral("title")));
     q.addBindValue(norm.value(QStringLiteral("author"), QString()));
@@ -149,7 +150,7 @@ Result BookService::updateBook(const OperatorContext& op, qint64 bookId, const Q
         sets << QStringLiteral("%1 = ?").arg(k);
         binds << norm.value(k);
     }
-    sets << QStringLiteral("updated_at = datetime('now','localtime')");
+    sets << QStringLiteral("updated_at = ") + DatabaseManager::instance().nowExpr();
 
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral("UPDATE books SET %1 WHERE id = %2")
@@ -167,7 +168,7 @@ static QVariantMap copyStats(QSqlDatabase db, qint64 bookId)
     QVariantMap stats;
     QSqlQuery q(db);
     q.prepare(QStringLiteral(
-        "SELECT status, COUNT(*) FROM copies WHERE book_id = ? GROUP BY status"));
+        "SELECT status, COUNT(*) FROM book_copies WHERE book_id = ? GROUP BY status"));
     q.addBindValue(bookId);
     q.exec();
     const QStringList keys = {
@@ -181,11 +182,11 @@ static QVariantMap copyStats(QSqlDatabase db, qint64 bookId)
         const QString st = q.value(0).toString();
         const int n = q.value(1).toInt();
         total += n;
-        if (st == QStringLiteral("AVAILABLE"))   stats[QStringLiteral("copy_available")] = n;
-        else if (st == QStringLiteral("BORROWED"))    stats[QStringLiteral("copy_borrowed")] = n;
-        else if (st == QStringLiteral("RESERVED"))    stats[QStringLiteral("copy_reserved")] = n;
-        else if (st == QStringLiteral("MAINTENANCE")) stats[QStringLiteral("copy_maintenance")] = n;
-        else if (st == QStringLiteral("LOST"))        stats[QStringLiteral("copy_lost")] = n;
+        if (st.compare(QStringLiteral("available"), Qt::CaseInsensitive) == 0) stats[QStringLiteral("copy_available")] = n;
+        else if (st.compare(QStringLiteral("borrowed"), Qt::CaseInsensitive) == 0) stats[QStringLiteral("copy_borrowed")] = n;
+        else if (st.compare(QStringLiteral("reserved"), Qt::CaseInsensitive) == 0) stats[QStringLiteral("copy_reserved")] = n;
+        else if (st.compare(QStringLiteral("maintenance"), Qt::CaseInsensitive) == 0) stats[QStringLiteral("copy_maintenance")] = n;
+        else if (st.compare(QStringLiteral("lost"), Qt::CaseInsensitive) == 0) stats[QStringLiteral("copy_lost")] = n;
     }
     stats.insert(QStringLiteral("copy_total"), total);
 
@@ -193,7 +194,7 @@ static QVariantMap copyStats(QSqlDatabase db, qint64 bookId)
     QStringList locations;
     QSqlQuery q2(db);
     q2.prepare(QStringLiteral(
-        "SELECT DISTINCT location FROM copies WHERE book_id = ? AND location <> '' ORDER BY location"));
+        "SELECT DISTINCT location FROM book_copies WHERE book_id = ? AND location <> '' ORDER BY location"));
     q2.addBindValue(bookId);
     q2.exec();
     while (q2.next()) locations << q2.value(0).toString();
@@ -276,10 +277,12 @@ Result BookService::listBooks(const OperatorContext& op, const QVariantMap& filt
         where << QStringLiteral("b.publisher LIKE ?");
         binds << QStringLiteral("%%1%").arg(publisher);
     }
-    const QString status = filter.value(QStringLiteral("status")).toString().trimmed().toUpper();
-    if (status == QStringLiteral("ACTIVE") || status == QStringLiteral("SHELVED_OFF")) {
+    const QString status = filter.value(QStringLiteral("status")).toString().trimmed();
+    bool stOk = false;
+    const BookStatus st = bookStatusFromString(status, &stOk);
+    if (stOk) {
         where << QStringLiteral("b.status = ?");
-        binds << status;
+        binds << bookStatusToString(st);
     }
     const QString whereSql =
         where.isEmpty() ? QString() : QStringLiteral(" WHERE ") + where.join(QStringLiteral(" AND "));
@@ -339,13 +342,13 @@ Result BookService::shelveOff(const OperatorContext& op, qint64 bookId)
     QVariantMap existing;
     Result f = fetchBookRow(bookId, &existing);
     if (!f.ok()) return f;
-    if (existing.value(QStringLiteral("status")).toString() == QStringLiteral("SHELVED_OFF"))
+    if (existing.value(QStringLiteral("status")).toString().compare(QStringLiteral("shelved_off"), Qt::CaseInsensitive) == 0)
         return Result::fail(ErrorCode::BookShelvedOff, QStringLiteral("该图书已处于下架状态"));
 
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral(
-        "UPDATE books SET status = 'SHELVED_OFF',"
-        " updated_at = datetime('now','localtime') WHERE id = ?"));
+    q.prepare(QStringLiteral("UPDATE books SET status = 'shelved_off', updated_at = ")
+                  + DatabaseManager::instance().nowExpr()
+                  + QStringLiteral(" WHERE id = ?"));
     q.addBindValue(bookId);
     if (!q.exec() || q.numRowsAffected() != 1)
         return Result::fail(ErrorCode::DbError, QStringLiteral("下架图书失败"));
@@ -366,7 +369,7 @@ Result BookService::deleteBook(const OperatorContext& op, qint64 bookId)
 
     // 该图书存在借阅记录 → 拒绝物理删除，提示改用下架
     QSqlQuery q(m_db);
-    q.prepare(QStringLiteral("SELECT COUNT(*) FROM borrow_records WHERE book_id = ?"));
+    q.prepare(QStringLiteral("SELECT COUNT(*) FROM loans WHERE book_id = ?"));
     q.addBindValue(bookId);
     if (!q.exec() || !q.next())
         return Result::fail(ErrorCode::DbError, QStringLiteral("借阅记录检查失败"));
@@ -377,7 +380,7 @@ Result BookService::deleteBook(const OperatorContext& op, qint64 bookId)
     if (!m_db.transaction())
         return Result::fail(ErrorCode::DbError, QStringLiteral("事务开启失败"));
     QSqlQuery d1(m_db);
-    d1.prepare(QStringLiteral("DELETE FROM copies WHERE book_id = ?"));
+    d1.prepare(QStringLiteral("DELETE FROM book_copies WHERE book_id = ?"));
     d1.addBindValue(bookId);
     QSqlQuery d2(m_db);
     d2.prepare(QStringLiteral("DELETE FROM books WHERE id = ?"));

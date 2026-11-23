@@ -9,6 +9,9 @@
  *  - 统一返回结构 Result{code, message, data, list, total}
  *  - 统一错误码枚举（前端按 code 分支展示，message 仅作透出文案）
  *  - 图书状态 / 副本状态枚举（副本状态机的唯一合法转换源在 CopyService）
+ *
+ * V1.1 适配：状态枚举字面量改为小写（与统一 MySQL DDL 的 ENUM 定义一致）。
+ *   *ToString 输出小写；*FromString 同时接受大小写（兼容按旧大写文档编写的调用方）。
  */
 #include <QString>
 #include <QStringList>
@@ -37,6 +40,10 @@ struct OperatorContext {
     QString userName;
     Role    role = Role::Reader;
     bool    authenticated = false;
+    // 会话代次（B 的 AuthService 维护）：账号停用/重置密码后 generation 递增，
+    // 旧 generation 的会话在 B 的统一入口即被拒绝。A 侧仅透传与记录日志，
+    // 不参与业务判断——会话生命周期管理始终是 B 的领域。
+    qint64  session_generation = 0;
 
     bool isStaff() const { return authenticated && (role == Role::Admin || role == Role::Librarian); }
     bool isAdmin() const { return authenticated && role == Role::Admin; }
@@ -47,21 +54,22 @@ enum class BookStatus { Active, ShelvedOff };
 
 inline QString bookStatusToString(BookStatus s)
 {
-    return s == BookStatus::Active ? QStringLiteral("ACTIVE") : QStringLiteral("SHELVED_OFF");
+    return s == BookStatus::Active ? QStringLiteral("active") : QStringLiteral("shelved_off");
 }
 
 inline BookStatus bookStatusFromString(const QString& s, bool* ok = nullptr)
 {
     if (ok) *ok = true;
-    if (s == QStringLiteral("ACTIVE"))      return BookStatus::Active;
-    if (s == QStringLiteral("SHELVED_OFF")) return BookStatus::ShelvedOff;
+    const QString v = s.trimmed().toLower();
+    if (v == QStringLiteral("active"))      return BookStatus::Active;
+    if (v == QStringLiteral("shelved_off")) return BookStatus::ShelvedOff;
     if (ok) *ok = false;
     return BookStatus::Active;
 }
 
 inline QString bookStatusDisplayName(const QString& s)
 {
-    return s == QStringLiteral("SHELVED_OFF") ? QStringLiteral("已下架") : QStringLiteral("正常");
+    return s.trimmed().toLower() == QStringLiteral("shelved_off") ? QStringLiteral("已下架") : QStringLiteral("正常");
 }
 
 // ===================== 副本状态（A 板块牵头定义，状态机见 CopyService） =====================
@@ -70,34 +78,36 @@ enum class CopyStatus { Available, Borrowed, Reserved, Maintenance, Lost };
 inline QString copyStatusToString(CopyStatus s)
 {
     switch (s) {
-    case CopyStatus::Available:   return QStringLiteral("AVAILABLE");
-    case CopyStatus::Borrowed:    return QStringLiteral("BORROWED");
-    case CopyStatus::Reserved:    return QStringLiteral("RESERVED");
-    case CopyStatus::Maintenance: return QStringLiteral("MAINTENANCE");
-    case CopyStatus::Lost:        return QStringLiteral("LOST");
+    case CopyStatus::Available:   return QStringLiteral("available");
+    case CopyStatus::Borrowed:    return QStringLiteral("borrowed");
+    case CopyStatus::Reserved:    return QStringLiteral("reserved");
+    case CopyStatus::Maintenance: return QStringLiteral("maintenance");
+    case CopyStatus::Lost:        return QStringLiteral("lost");
     }
-    return QStringLiteral("AVAILABLE");
+    return QStringLiteral("available");
 }
 
 inline CopyStatus copyStatusFromString(const QString& s, bool* ok = nullptr)
 {
     if (ok) *ok = true;
-    if (s == QStringLiteral("AVAILABLE"))   return CopyStatus::Available;
-    if (s == QStringLiteral("BORROWED"))    return CopyStatus::Borrowed;
-    if (s == QStringLiteral("RESERVED"))    return CopyStatus::Reserved;
-    if (s == QStringLiteral("MAINTENANCE")) return CopyStatus::Maintenance;
-    if (s == QStringLiteral("LOST"))        return CopyStatus::Lost;
+    const QString v = s.trimmed().toLower();
+    if (v == QStringLiteral("available"))   return CopyStatus::Available;
+    if (v == QStringLiteral("borrowed"))    return CopyStatus::Borrowed;
+    if (v == QStringLiteral("reserved"))    return CopyStatus::Reserved;
+    if (v == QStringLiteral("maintenance")) return CopyStatus::Maintenance;
+    if (v == QStringLiteral("lost"))        return CopyStatus::Lost;
     if (ok) *ok = false;
     return CopyStatus::Available;
 }
 
 inline QString copyStatusDisplayName(const QString& s)
 {
-    if (s == QStringLiteral("AVAILABLE"))   return QStringLiteral("在馆可借");
-    if (s == QStringLiteral("BORROWED"))    return QStringLiteral("借出");
-    if (s == QStringLiteral("RESERVED"))    return QStringLiteral("预约保留待取");
-    if (s == QStringLiteral("MAINTENANCE")) return QStringLiteral("维修中");
-    if (s == QStringLiteral("LOST"))        return QStringLiteral("遗失报损");
+    const QString v = s.trimmed().toLower();
+    if (v == QStringLiteral("available"))   return QStringLiteral("在馆可借");
+    if (v == QStringLiteral("borrowed"))    return QStringLiteral("借出");
+    if (v == QStringLiteral("reserved"))    return QStringLiteral("预约保留待取");
+    if (v == QStringLiteral("maintenance")) return QStringLiteral("维修中");
+    if (v == QStringLiteral("lost"))        return QStringLiteral("遗失报损");
     return s;
 }
 

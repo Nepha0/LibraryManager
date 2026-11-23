@@ -27,11 +27,11 @@ struct SearchCore {
                 "SELECT b.id, b.isbn, b.title, b.author, b.publisher, b.publish_date, b.status,"
                 " c.name AS category_name,"
                 " COUNT(cp.id) AS copy_total,"
-                " COALESCE(SUM(CASE WHEN cp.status = 'AVAILABLE' THEN 1 ELSE 0 END), 0) AS available_count,"
+                " COALESCE(SUM(CASE WHEN cp.status = 'available' THEN 1 ELSE 0 END), 0) AS available_count,"
                 " GROUP_CONCAT(DISTINCT cp.location) AS locations"
                 " FROM books b"
                 " LEFT JOIN categories c ON c.id = b.category_id"
-                " LEFT JOIN copies cp ON cp.book_id = b.id");
+                " LEFT JOIN book_copies cp ON cp.book_id = b.id");
         const QString groupBy = QStringLiteral(" GROUP BY b.id");
         const QString having =
             havingSql.isEmpty() ? QString()

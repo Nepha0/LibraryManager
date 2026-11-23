@@ -25,7 +25,7 @@ Result SearchService::search(const OperatorContext& op, const QString& keyword,
 
     const QString like = QStringLiteral("%%1%").arg(kw);
     const QString where = QStringLiteral(
-        " WHERE b.status = 'ACTIVE'"
+        " WHERE b.status = 'active'"
         " AND (b.title LIKE ? OR b.author LIKE ? OR b.isbn LIKE ?)");
     QVariantList binds { like, like, like };
 

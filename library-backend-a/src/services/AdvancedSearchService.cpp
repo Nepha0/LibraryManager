@@ -177,11 +177,11 @@ Result AdvancedSearchService::advancedSearch(const OperatorContext& op,
     {
         const QString cs = conditions.value(QStringLiteral("copyStatus")).toString().trimmed().toUpper();
         if (!cs.isEmpty()) {
-            if (cs == QStringLiteral("AVAILABLE")) {
-                having << QStringLiteral("COALESCE(SUM(CASE WHEN cp.status = 'AVAILABLE' THEN 1 ELSE 0 END), 0) > 0");
+            if (cs.compare(QStringLiteral("AVAILABLE"), Qt::CaseInsensitive) == 0) {
+                having << QStringLiteral("COALESCE(SUM(CASE WHEN cp.status = 'available' THEN 1 ELSE 0 END), 0) > 0");
                 ++validConditions;
-            } else if (cs == QStringLiteral("UNAVAILABLE")) {
-                having << QStringLiteral("COALESCE(SUM(CASE WHEN cp.status = 'AVAILABLE' THEN 1 ELSE 0 END), 0) = 0");
+            } else if (cs.compare(QStringLiteral("UNAVAILABLE"), Qt::CaseInsensitive) == 0) {
+                having << QStringLiteral("COALESCE(SUM(CASE WHEN cp.status = 'available' THEN 1 ELSE 0 END), 0) = 0");
                 ++validConditions;
             } else {
                 invalidReasons << QStringLiteral("馆藏状态非法：%1（仅支持 AVAILABLE / UNAVAILABLE）").arg(cs);
@@ -194,7 +194,7 @@ Result AdvancedSearchService::advancedSearch(const OperatorContext& op,
         if (!locs.isEmpty()) {
             QStringList parts;
             for (const QString& loc : locs) {
-                parts << QStringLiteral("EXISTS (SELECT 1 FROM copies lc"
+                parts << QStringLiteral("EXISTS (SELECT 1 FROM book_copies lc"
                                         " WHERE lc.book_id = b.id AND lc.location LIKE ?)");
                 binds << QStringLiteral("%%1%").arg(loc);
             }
@@ -215,8 +215,8 @@ Result AdvancedSearchService::advancedSearch(const OperatorContext& op,
                             QStringLiteral("检索条件全部非法：%1").arg(invalidReasons.join(QStringLiteral("；"))));
 
     const QString whereSql = where.isEmpty()
-                                 ? QStringLiteral(" WHERE b.status = 'ACTIVE'")
-                                 : QStringLiteral(" WHERE b.status = 'ACTIVE' AND ")
+                                 ? QStringLiteral(" WHERE b.status = 'active'")
+                                 : QStringLiteral(" WHERE b.status = 'active' AND ")
                                        + where.join(QStringLiteral(" AND "));
     // 个别非法条件被忽略时给出提示（其余条件仍然执行）
     QVariantList rows;

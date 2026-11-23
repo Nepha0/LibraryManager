@@ -1,31 +1,33 @@
 -- ============================================================
--- 图书馆管理系统 · 9 张核心表 DDL（阶段0 契约产物，供全组评审）
--- 单一事实来源：src/database/DatabaseManager.cpp 内嵌 SCHEMA_SQL
--- 本文件由其生成，仅用于评审阅读；变更请改 C++ 源后重新同步
--- A 牵头：categories / books / copies
--- B 牵头：users / readers / system_params / operation_logs
--- C 牵头：borrow_records / reservations
+-- 图书馆管理系统 · 9 张业务表 DDL（SQLite 版，V1.1 适配）
+-- 结构与 docs/统一MySQL-DDL-V1.1-干净版.sql 对齐（表名/列名/枚举小写）
+-- 单一事实来源：src/database/DatabaseManager.cpp 的 schemaSql()
+-- 本文件由其提取，仅用于评审阅读；变更请改 C++ 源后重新同步
+-- MySQL 生产库不使用本文件（由统一 DDL / 003 迁移脚本建表）
 -- ============================================================
 
 -- ============ B 板块牵头：用户 / 读者 ============
 CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    username      TEXT    NOT NULL UNIQUE,             -- 登录账号，唯一
-    password_hash TEXT    NOT NULL,                    -- SHA-256 + 盐
+    username      TEXT    NOT NULL UNIQUE,
+    display_name  TEXT    NOT NULL,
+    password_hash TEXT    NOT NULL,
     salt          TEXT    NOT NULL,
-    name          TEXT    NOT NULL,
-    role          TEXT    NOT NULL DEFAULT 'READER',   -- ADMIN / LIBRARIAN / READER
-    status        TEXT    NOT NULL DEFAULT 'ACTIVE',   -- ACTIVE / DISABLED
-    created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+    role          TEXT    NOT NULL DEFAULT 'reader',   -- admin/librarian/reader
+    active        INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS readers (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    card_no       TEXT    NOT NULL UNIQUE,             -- 读者证号，唯一
-    name          TEXT    NOT NULL,                    -- 姓名（无类别字段）
+    user_id       INTEGER,
+    reader_no     TEXT    NOT NULL UNIQUE,
+    name          TEXT    NOT NULL,
     phone         TEXT    DEFAULT '',
-    status        TEXT    NOT NULL DEFAULT 'ACTIVE',   -- ACTIVE / DISABLED
-    registered_at TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+    active        INTEGER NOT NULL DEFAULT 1,
+    registered_at TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
 -- ============ A 板块牵头：分类 / 图书 / 副本 ============
@@ -38,85 +40,85 @@ CREATE TABLE IF NOT EXISTS categories (
 
 CREATE TABLE IF NOT EXISTS books (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    isbn         TEXT NOT NULL,                      -- ISBN，唯一校验在业务层（仅 ACTIVE 范围内唯一）
+    isbn         TEXT NOT NULL UNIQUE,                 -- 全局唯一（含下架书）
     title        TEXT NOT NULL,
     author       TEXT DEFAULT '',
     publisher    TEXT DEFAULT '',
-    publish_date TEXT DEFAULT '',                    -- yyyy-MM-dd
-    category_id  INTEGER NOT NULL REFERENCES categories(id),
+    publish_date TEXT DEFAULT '',                      -- yyyy-MM-dd
+    category_id  INTEGER REFERENCES categories(id),
     intro        TEXT DEFAULT '',
     cover_path   TEXT DEFAULT '',
-    status       TEXT NOT NULL DEFAULT 'ACTIVE',     -- ACTIVE / SHELVED_OFF（下架=逻辑删除）
+    status       TEXT NOT NULL DEFAULT 'active',       -- active/shelved_off（下架=逻辑删除）
     created_at   TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_books_category  ON books(category_id);
 CREATE INDEX IF NOT EXISTS idx_books_title     ON books(title);
-CREATE INDEX IF NOT EXISTS idx_books_isbn      ON books(isbn);
 
-CREATE TABLE IF NOT EXISTS copies (
+CREATE TABLE IF NOT EXISTS book_copies (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    barcode       TEXT NOT NULL UNIQUE,              -- 条码，全局唯一
+    copy_code     TEXT NOT NULL UNIQUE,                -- 副本条码，全局唯一
     book_id       INTEGER NOT NULL REFERENCES books(id),
-    location      TEXT DEFAULT '',
-    status        TEXT NOT NULL DEFAULT 'AVAILABLE', -- AVAILABLE/BORROWED/RESERVED/MAINTENANCE/LOST
-    acquired_date TEXT DEFAULT '',                   -- 入藏日期 yyyy-MM-dd
+    location      TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'available',  -- available/borrowed/reserved/maintenance/lost
+    acquired_date TEXT DEFAULT '',                     -- 入藏日期 yyyy-MM-dd
     created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     updated_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
-CREATE INDEX IF NOT EXISTS idx_copies_book ON copies(book_id);
+CREATE INDEX IF NOT EXISTS idx_copies_book ON book_copies(book_id, status);
 
 -- ============ C 板块牵头：借阅记录 / 预约 ============
-CREATE TABLE IF NOT EXISTS borrow_records (
+CREATE TABLE IF NOT EXISTS loans (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    copy_id       INTEGER NOT NULL REFERENCES book_copies(id),
     reader_id     INTEGER NOT NULL REFERENCES readers(id),
     book_id       INTEGER NOT NULL REFERENCES books(id),
-    copy_id       INTEGER NOT NULL REFERENCES copies(id),
-    borrowed_date TEXT    NOT NULL,                 -- 借出日期
-    due_date      TEXT    NOT NULL,                 -- 应还日期
-    returned_date TEXT    DEFAULT NULL,             -- 实际归还日期
-    status        TEXT    NOT NULL DEFAULT 'BORROWED', -- BORROWED / RETURNED
+    borrowed_at   TEXT NOT NULL,
+    due_at        TEXT NOT NULL,
+    returned_at   TEXT DEFAULT NULL,
     renew_count   INTEGER NOT NULL DEFAULT 0
 );
--- 双保险之一：同一副本同时只允许一条有效借阅（数据库层唯一约束）
-CREATE UNIQUE INDEX IF NOT EXISTS idx_active_borrow_per_copy
-    ON borrow_records(copy_id) WHERE status = 'BORROWED';
-CREATE INDEX IF NOT EXISTS idx_borrow_reader ON borrow_records(reader_id);
-CREATE INDEX IF NOT EXISTS idx_borrow_book   ON borrow_records(book_id);
+-- 一副本同时仅一条有效借阅（SQLite 部分唯一索引 ≡ MySQL 生成列唯一约束）
+CREATE UNIQUE INDEX IF NOT EXISTS uk_active_copy ON loans(copy_id) WHERE returned_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_loans_reader ON loans(reader_id, returned_at);
+CREATE INDEX IF NOT EXISTS idx_loans_book   ON loans(book_id);
 
 CREATE TABLE IF NOT EXISTS reservations (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     book_id         INTEGER NOT NULL REFERENCES books(id),
     reader_id       INTEGER NOT NULL REFERENCES readers(id),
-    queue_no        INTEGER NOT NULL,              -- 排队序号
-    status          TEXT    NOT NULL DEFAULT 'WAITING', -- WAITING/READY_TO_PICK/FINISHED/CANCELLED/EXPIRED
-    requested_at    TEXT    NOT NULL,
-    pickup_deadline TEXT    DEFAULT NULL           -- 待取截止时间
+    queue_no        INTEGER NOT NULL DEFAULT 0,
+    status          TEXT NOT NULL DEFAULT 'waiting',   -- waiting/ready_to_pick/finished/cancelled/expired
+    requested_at    TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    pickup_deadline TEXT DEFAULT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_reservation_book ON reservations(book_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_active_reservation
+    ON reservations(book_id, reader_id) WHERE status IN ('waiting','ready_to_pick');
+CREATE INDEX IF NOT EXISTS idx_res_book ON reservations(book_id, status);
 
 -- ============ B 板块牵头：系统参数 / 操作日志 ============
 CREATE TABLE IF NOT EXISTS system_params (
-    key        TEXT PRIMARY KEY,                   -- loan_period_days / loan_limit / max_renew_count /
-                                                   -- reservation_hold_days / renew_period_days
-    value      TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    param_key   TEXT PRIMARY KEY,                      -- borrow_period_days/borrow_limit/max_renew_times/...
+    param_value TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS operation_logs (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    operator_id  INTEGER,
-    operator_name TEXT NOT NULL,
-    op_type      TEXT NOT NULL,                    -- BOOK_UPDATE / COPY_STATUS / ...
-    target_type  TEXT NOT NULL,                    -- BOOK / COPY / READER / PARAM ...
-    target_id    TEXT DEFAULT '',
-    detail       TEXT DEFAULT '',
-    created_at   TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    operator_user_id INTEGER,
+    operator_name    TEXT DEFAULT '',
+    action_type      TEXT NOT NULL,
+    target_type      TEXT NOT NULL,
+    target_id        TEXT DEFAULT '',
+    detail           TEXT DEFAULT '',
+    created_at       TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 
--- 系统参数默认值（INSERT OR IGNORE 保证幂等；B 板块 ParamService 负责读写）
-INSERT OR IGNORE INTO system_params(key, value) VALUES ('loan_period_days',       '30');
-INSERT OR IGNORE INTO system_params(key, value) VALUES ('loan_limit',             '5');
-INSERT OR IGNORE INTO system_params(key, value) VALUES ('max_renew_count',        '2');
-INSERT OR IGNORE INTO system_params(key, value) VALUES ('reservation_hold_days',  '3');
-INSERT OR IGNORE INTO system_params(key, value) VALUES ('renew_period_days',      '15');
+-- 系统参数默认值（INSERT OR IGNORE 保证幂等）
+INSERT OR IGNORE INTO system_params(param_key, param_value, description) VALUES
+    ('borrow_period_days',      '30', '借阅期限，单位为天'),
+    ('borrow_limit',            '5',  '每名读者最大借阅数量'),
+    ('max_renew_times',         '2',  '每条借阅记录最大续借次数'),
+    ('reservation_hold_days',   '3',  '预约待取保留期限，单位为天'),
+    ('renew_period_days',       '15', '每次续借延长天数');
