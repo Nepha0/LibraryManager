@@ -93,7 +93,7 @@ bool CirculationService::borrowBook(const UserSession &session,
     }
 
     query.prepare(QStringLiteral(
-        "SELECT status FROM book_copies WHERE id = ? FOR UPDATE"));
+        "SELECT status, book_id FROM book_copies WHERE id = ? FOR UPDATE"));
     query.addBindValue(copyId);
     if (!query.exec() || !query.next()) {
         database.rollback();
@@ -110,11 +110,14 @@ bool CirculationService::borrowBook(const UserSession &session,
         return false;
     }
 
+    const int bookId = query.value(1).toInt();
+
     query.prepare(QStringLiteral(
-        "INSERT INTO loans(copy_id, reader_id, borrowed_at, due_at) "
-        "VALUES(?, ?, CURRENT_TIMESTAMP, TIMESTAMPADD(DAY, ?, CURRENT_TIMESTAMP))"));
+        "INSERT INTO loans(copy_id, reader_id, book_id, borrowed_at, due_at) "
+        "VALUES(?, ?, ?, CURRENT_DATE, DATE_ADD(CURRENT_DATE, INTERVAL ? DAY))"));
     query.addBindValue(copyId);
     query.addBindValue(readerId);
+    query.addBindValue(bookId);
     query.addBindValue(*loanDays);
     if (!query.exec()) {
         database.rollback();

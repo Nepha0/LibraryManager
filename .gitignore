@@ -50,4 +50,5 @@ Thumbs.db
 
 # Exported library data
 /exports/
+/database/backups/
 借阅流水-*.csv
