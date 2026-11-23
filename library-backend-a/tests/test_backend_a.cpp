@@ -21,65 +21,9 @@
 #include "services/SearchService.h"
 #include "services/AdvancedSearchService.h"
 #include "services/ImportExportService.h"
+#include "test_backend_a.h"
 
 using namespace lib;
-
-class TestBackendA : public QObject {
-    Q_OBJECT
-
-private slots:
-    void init();            // 每个用例前重建内存库
-    void cleanup() {}
-
-    // ---------- BookService ----------
-    void bookAddValidation();
-    void bookAddGetWithStats();
-    void bookUpdate();
-    void bookListPaginationAndFilters();
-    void bookShelveOffAndDelete();
-
-    // ---------- CopyService ----------
-    void copyAddValidation();
-    void copyStateMachineLegalPaths();
-    void copyStateMachineIllegalPaths();
-    void copyMaintenanceLostAdminOnly();
-    void copyRulesOnShelvedBook();
-    void copyListAndUpdate();
-
-    // ---------- SearchService ----------
-    void searchKeyword();
-
-    // ---------- AdvancedSearchService ----------
-    void advancedAndOrLogic();
-    void advancedFilters();
-    void advancedSorting();
-    void advancedEdgeCases();
-
-    // ---------- CategoryService ----------
-    void categoryCrud();
-
-    // ---------- ImportExportService ----------
-    void importCsvBooksErrorRows();
-    void importCsvCopies();
-    void importEmptyAndBadFormat();
-    void exportImportRoundTripCsv();
-    void exportImportRoundTripXlsx();
-    void exportLargeFile();
-
-private:
-    OperatorContext admin()  { return { 1, "admin",     Role::Admin,     true }; }
-    OperatorContext libOp()  { return { 2, "librarian", Role::Librarian, true }; }
-    OperatorContext reader() { return { 3, "reader",    Role::Reader,    true }; }
-    OperatorContext anon()   { return { 0, QString(),   Role::Reader,    false }; }
-
-    // 造数据：返回 (category_id, book_id)
-    qint64 mkCategory(const QString& name);
-    qint64 mkBook(qint64 catId, const QString& isbn, const QString& title,
-                  const QString& author = QString(), const QString& publisher = QString(),
-                  const QString& date = QString());
-    qint64 mkCopy(qint64 bookId, const QString& barcode, const QString& location = QString());
-    void insertReaderAndBorrow(qint64 bookId); // 直插 B/C 表结构数据，用于删除校验
-};
 
 void TestBackendA::init()
 {
@@ -920,7 +864,7 @@ void TestBackendA::importEmptyAndBadFormat()
 
     // 空文件
     const QString emptyPath = dir.filePath(QStringLiteral("empty.csv"));
-    { QFile f(emptyPath); f.open(QIODevice::WriteOnly); }
+    { QFile f(emptyPath); QVERIFY(f.open(QIODevice::WriteOnly)); }
     Result r = s.importBooks(admin(), emptyPath);
     QCOMPARE(r.code, ErrorCode::FormatError);
     QVERIFY(r.message.contains(QStringLiteral("为空")));
@@ -939,7 +883,7 @@ void TestBackendA::importEmptyAndBadFormat()
 
     // 不支持的格式
     const QString txtPath = dir.filePath(QStringLiteral("data.txt"));
-    { QFile f2(txtPath); f2.open(QIODevice::WriteOnly); f2.write("hello"); }
+    { QFile f2(txtPath); QVERIFY(f2.open(QIODevice::WriteOnly)); f2.write("hello"); }
     r = s.importBooks(admin(), txtPath);
     QCOMPARE(r.code, ErrorCode::FormatError);
     QVERIFY(r.message.contains(QStringLiteral("不支持的文件格式")));
@@ -1092,4 +1036,4 @@ void TestBackendA::exportLargeFile()
 }
 
 QTEST_MAIN(TestBackendA)
-#include "test_backend_a.moc"
+// 注：类声明在 test_backend_a.h（已登记 HEADERS），moc 由 qmake 单独编译，无需再 include .moc

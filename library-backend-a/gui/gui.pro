@@ -5,8 +5,9 @@ TEMPLATE = app
 TARGET = backend_a_gui
 
 INCLUDEPATH += $$PWD/../src
-LIBS += -L$$OUT_PWD/../src -lbackenda
-PRE_TARGETDEPS += $$OUT_PWD/../src/libbackenda.a
+# 静态库固定输出在源码目录 src/ 下（src.pro DESTDIR=$$PWD），shadow build 下同样成立
+LIBS += $$PWD/../src/libbackenda.a
+PRE_TARGETDEPS += $$PWD/../src/libbackenda.a
 
 SOURCES += main.cpp mainwindow.cpp
 HEADERS += mainwindow.h
