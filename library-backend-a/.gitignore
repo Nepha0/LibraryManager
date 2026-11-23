@@ -1,0 +1,21 @@
+# 构建产物
+*.o
+*.a
+*.exe
+*.moc
+*.obj
+release/
+debug/
+Makefile*
+.qmake.stash
+.qtc_clangd/
+*.zip
+
+# 运行产物
+demo_library.db
+demo_out/
+results.txt
+test_results.txt
+out*.txt
+single.txt
+demo_output.txt
