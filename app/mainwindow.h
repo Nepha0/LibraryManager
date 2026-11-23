@@ -36,6 +36,10 @@ private:
     void handleLogout();
     void addBook();
     void addReader();
+    void updateSelectedReader();
+    void toggleSelectedReaderStatus();
+    void showSelectedReaderDetail();
+    void clearReaderSelection();
     void borrowBook();
     void returnSelectedBook();
     void exportLoans();
@@ -88,6 +92,12 @@ private:
     QLineEdit *m_readerName = nullptr;
     QLineEdit *m_readerPhone = nullptr;
     QTableWidget *m_readersTable = nullptr;
+    QLineEdit *m_readerFilterNo = nullptr;
+    QLineEdit *m_readerFilterName = nullptr;
+    QComboBox *m_readerFilterStatus = nullptr;
+    QLabel *m_readerDetail = nullptr;
+    int m_selectedReaderId = 0;
+    bool m_selectedReaderEnabled = true;
 
     QLabel *m_reportTitles = nullptr;
     QLabel *m_reportReaders = nullptr;

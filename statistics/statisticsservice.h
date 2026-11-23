@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../auth/authservice.h"
+
 #include <QDateTime>
 #include <QString>
 #include <QVector>
@@ -28,7 +30,17 @@ struct LoanHistoryInfo
 class StatisticsService
 {
 public:
-    DashboardStats dashboard(QString *error) const;
-    QVector<LoanHistoryInfo> loanHistory(int limit, QString *error) const;
-    bool exportCsv(const QString &fileName, QString *error) const;
+    DashboardStats dashboard(
+        const UserSession &session,
+        QString *error) const;
+
+    QVector<LoanHistoryInfo> loanHistory(
+        const UserSession &session,
+        int limit,
+        QString *error) const;
+
+    bool exportCsv(
+        const UserSession &session,
+        const QString &fileName,
+        QString *error) const;
 };

@@ -472,13 +472,192 @@ ReaderEligibilityResult ReaderService::checkReaderEligibility(
         query.value(2).toInt();
 
     if (!result.readerEnabled) {
-        result.reason = QStringLiteral("读者已停用");
-    } else if (!result.accountEnabled) {
-        result.reason = QStringLiteral("关联账号已停用");
-    } else if (result.activeLoans >= result.borrowLimit) {
-        result.reason = QStringLiteral("已达到借阅上限");
-    } else {
-        result.eligible = true;
+        result.reasons.append(
+            QStringLiteral("读者已停用"));
+    }
+
+    if (!result.accountEnabled) {
+        result.reasons.append(
+            QStringLiteral("关联账号已停用"));
+    }
+
+    if (result.activeLoans >= result.borrowLimit) {
+        result.reasons.append(
+            QStringLiteral("已达到借阅上限"));
+    }
+
+    result.eligible = result.reasons.isEmpty();
+    result.reason = result.reasons.join(
+        QStringLiteral("；"));
+
+    if (error) {
+        error->clear();
+    }
+
+    return result;
+}
+
+std::optional<ReaderDetail> ReaderService::getReader(
+    const UserSession &session,
+    int readerId,
+    QString *error) const
+{
+    if (!PermissionService::requirePermission(
+            session,
+            Permission::ViewReaders,
+            error)) {
+        return std::nullopt;
+    }
+
+    if (readerId <= 0) {
+        if (error) {
+            *error = QStringLiteral("无效的读者ID");
+        }
+        return std::nullopt;
+    }
+
+    QSqlQuery query(Database::connection());
+    query.prepare(QStringLiteral(
+        "SELECT "
+        "r.id, r.reader_no, r.name, "
+        "COALESCE(r.phone, ''), r.active, "
+        "COUNT(l.id), "
+        "SUM(CASE WHEN l.id IS NOT NULL "
+        "AND l.returned_at IS NULL THEN 1 ELSE 0 END), "
+        "SUM(CASE WHEN l.id IS NOT NULL "
+        "AND l.returned_at IS NOT NULL THEN 1 ELSE 0 END), "
+        "SUM(CASE WHEN l.id IS NOT NULL "
+        "AND l.returned_at IS NULL "
+        "AND l.due_at < CURRENT_TIMESTAMP "
+        "THEN 1 ELSE 0 END) "
+        "FROM readers r "
+        "LEFT JOIN loans l ON l.reader_id = r.id "
+        "WHERE r.id = ? "
+        "GROUP BY r.id, r.reader_no, r.name, "
+        "r.phone, r.active"));
+    query.addBindValue(readerId);
+
+    if (!query.exec()) {
+        if (error) {
+            *error = QStringLiteral("查询读者详情失败");
+        }
+        return std::nullopt;
+    }
+
+    if (!query.next()) {
+        if (error) {
+            *error = QStringLiteral("读者不存在");
+        }
+        return std::nullopt;
+    }
+
+    ReaderDetail detail;
+    detail.info.id = query.value(0).toInt();
+    detail.info.readerNo = query.value(1).toString();
+    detail.info.name = query.value(2).toString();
+    detail.info.phone = query.value(3).toString();
+    detail.info.enabled = query.value(4).toInt() == 1;
+    detail.totalLoans = query.value(5).toInt();
+    detail.info.activeLoans = query.value(6).toInt();
+    detail.returnedLoans = query.value(7).toInt();
+    detail.overdueLoans = query.value(8).toInt();
+
+    if (error) {
+        error->clear();
+    }
+
+    return detail;
+}
+
+QVector<ReaderInfo> ReaderService::readers(
+    const UserSession &session,
+    const ReaderQuery &criteria,
+    QString *error) const
+{
+    QVector<ReaderInfo> result;
+
+    if (!PermissionService::requirePermission(
+            session,
+            Permission::ViewReaders,
+            error)) {
+        return result;
+    }
+
+    QString sql = QStringLiteral(
+        "SELECT "
+        "r.id, r.reader_no, r.name, "
+        "COALESCE(r.phone, ''), "
+        "COUNT(l.id), r.active "
+        "FROM readers r "
+        "LEFT JOIN loans l "
+        "ON l.reader_id = r.id "
+        "AND l.returned_at IS NULL "
+        "WHERE 1 = 1 ");
+
+    const QString readerNo =
+        criteria.readerNo.trimmed();
+    const QString name =
+        criteria.name.trimmed();
+
+    if (!readerNo.isEmpty()) {
+        sql += QStringLiteral(
+            "AND r.reader_no LIKE :reader_no ");
+    }
+
+    if (!name.isEmpty()) {
+        sql += QStringLiteral(
+            "AND r.name LIKE :name ");
+    }
+
+    if (criteria.enabled.has_value()) {
+        sql += QStringLiteral(
+            "AND r.active = :active ");
+    }
+
+    sql += QStringLiteral(
+        "GROUP BY r.id, r.reader_no, r.name, "
+        "r.phone, r.active "
+        "ORDER BY r.id DESC");
+
+    QSqlQuery query(Database::connection());
+    query.prepare(sql);
+
+    if (!readerNo.isEmpty()) {
+        query.bindValue(
+            QStringLiteral(":reader_no"),
+            QStringLiteral("%") + readerNo
+                + QStringLiteral("%"));
+    }
+
+    if (!name.isEmpty()) {
+        query.bindValue(
+            QStringLiteral(":name"),
+            QStringLiteral("%") + name
+                + QStringLiteral("%"));
+    }
+
+    if (criteria.enabled.has_value()) {
+        query.bindValue(
+            QStringLiteral(":active"),
+            *criteria.enabled ? 1 : 0);
+    }
+
+    if (!query.exec()) {
+        if (error) {
+            *error = QStringLiteral("查询读者列表失败");
+        }
+        return result;
+    }
+
+    while (query.next()) {
+        ReaderInfo reader;
+        reader.id = query.value(0).toInt();
+        reader.readerNo = query.value(1).toString();
+        reader.name = query.value(2).toString();
+        reader.phone = query.value(3).toString();
+        reader.activeLoans = query.value(4).toInt();
+        reader.enabled = query.value(5).toInt() == 1;
+        result.append(reader);
     }
 
     if (error) {
@@ -492,41 +671,8 @@ QVector<ReaderInfo> ReaderService::readers(
     const UserSession &session,
     QString *error) const
 {
-    QVector<ReaderInfo> result;
-
-    if (!PermissionService::requirePermission(
-            session,
-            Permission::ViewReaders,
-            error)) {
-        return result;
-    }
-
-    QSqlQuery query(Database::connection());
-    if (!query.exec(QStringLiteral(
-            "SELECT r.id, r.reader_no, r.name, COALESCE(r.phone, ''), "
-            "COUNT(l.id), r.active "
-            "FROM readers r "
-            "LEFT JOIN loans l ON l.reader_id = r.id AND l.returned_at IS NULL "
-            "GROUP BY r.id, r.reader_no, r.name, r.phone, r.active "
-            "ORDER BY r.id DESC"))) {
-        if (error) {
-            *error = query.lastError().text();
-        }
-        return result;
-    }
-    while (query.next()) {
-        ReaderInfo reader;
-        reader.id = query.value(0).toInt();
-        reader.readerNo = query.value(1).toString();
-        reader.name = query.value(2).toString();
-        reader.phone = query.value(3).toString();
-        reader.activeLoans = query.value(4).toInt();
-        reader.enabled = query.value(5).toInt() == 1;
-        result.append(reader);
-    }
-    if (error) {
-        error->clear();
-    }
-
-    return result;
+    return readers(
+        session,
+        ReaderQuery{},
+        error);
 }

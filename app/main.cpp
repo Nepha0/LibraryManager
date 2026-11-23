@@ -38,7 +38,7 @@ bool runServiceSmokeTest()
     }
 
     StatisticsService statistics;
-    const DashboardStats before = statistics.dashboard(&error);
+    const DashboardStats before = statistics.dashboard(*session, &error);
     if (!error.isEmpty()) {
         qCritical().noquote() << error;
         return false;
@@ -55,7 +55,7 @@ bool runServiceSmokeTest()
         return false;
     }
 
-    const auto copies = books.availableCopies(&error);
+    const auto copies = books.availableCopies(*session, &error);
     int copyId = 0;
     for (const auto &copy : copies) {
         if (copy.code.startsWith(isbn)) {
@@ -75,7 +75,7 @@ bool runServiceSmokeTest()
         return false;
     }
 
-    const auto activeLoans = circulation.activeLoans(&error);
+    const auto activeLoans = circulation.activeLoans(*session, &error);
     int loanId = 0;
     for (const auto &loan : activeLoans) {
         if (loan.copyCode.startsWith(isbn) && loan.readerName == readerName
@@ -88,7 +88,7 @@ bool runServiceSmokeTest()
         qCritical() << "Smoke test could not find the active loan.";
         return false;
     }
-    const DashboardStats during = statistics.dashboard(&error);
+    const DashboardStats during = statistics.dashboard(*session, &error);
     if (!error.isEmpty() || during.activeLoans != before.activeLoans + 1
         || during.availableCopies != before.availableCopies) {
         qCritical().noquote() << "Borrow did not update statistics as expected." << error;
@@ -105,13 +105,13 @@ bool runServiceSmokeTest()
         return false;
     }
 
-    const auto history = statistics.loanHistory(1, &error);
+    const auto history = statistics.loanHistory(*session, 1, &error);
     if (history.isEmpty() || history.front().readerNo != readerNo
         || !history.front().returnedAt.isValid()) {
         qCritical().noquote() << "Returned loan is missing from history." << error;
         return false;
     }
-    const DashboardStats stats = statistics.dashboard(&error);
+    const DashboardStats stats = statistics.dashboard(*session, &error);
     if (!error.isEmpty() || stats.titles != before.titles + 1
         || stats.availableCopies != before.availableCopies + 1
         || stats.activeLoans != before.activeLoans) {

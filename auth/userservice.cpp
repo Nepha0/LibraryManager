@@ -903,6 +903,11 @@ bool UserService::setUserStatus(
         return false;
     }
 
+    if (!enabled) {
+        PermissionService::invalidateUserSessions(
+            static_cast<int>(userId));
+    }
+
     if (error) {
         error->clear();
     }

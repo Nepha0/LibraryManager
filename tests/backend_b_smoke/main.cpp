@@ -1,10 +1,13 @@
 #include "auth/authservice.h"
 #include "auth/permissionservice.h"
+#include "books/bookservice.h"
+#include "circulation/circulationservice.h"
 #include "common/database.h"
 #include "common/paramservice.h"
 #include "common/operationlogservice.h"
 #include "auth/userservice.h"
 #include "readers/readerservice.h"
+#include "statistics/statisticsservice.h"
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -172,13 +175,85 @@ int main(int argc, char *argv[])
         }
     }
 
-    UserSession readerSession;
-    readerSession.userId = 999;
-    readerSession.username = QStringLiteral("test-reader");
-    readerSession.displayName = QStringLiteral("测试读者");
-    readerSession.role = QStringLiteral("reader");
-    readerSession.permissions =
-        PermissionService::permissionsForRole(readerSession.role);
+    const QString roleTestPassword =
+        QStringLiteral("role-test-password");
+    const QString readerRoleUsername =
+        QStringLiteral("role-reader-%1")
+            .arg(temporarySuffix);
+    const QString librarianRoleUsername =
+        QStringLiteral("role-librarian-%1")
+            .arg(temporarySuffix);
+
+    auto createRoleTestAccount =
+        [&](const QString &username,
+            const QString &displayName,
+            const QString &role) {
+            const QString salt =
+                QStringLiteral("salt-%1")
+                    .arg(username);
+
+            QSqlQuery query(
+                Database::connection());
+            query.prepare(QStringLiteral(
+                "INSERT INTO users ("
+                "username, display_name, password_hash, "
+                "salt, role, active) "
+                "VALUES (?, ?, "
+                "SHA2(CONCAT(?, ?), 256), "
+                "?, ?, 1)"));
+            query.addBindValue(username);
+            query.addBindValue(displayName);
+            query.addBindValue(salt);
+            query.addBindValue(roleTestPassword);
+            query.addBindValue(salt);
+            query.addBindValue(role);
+            return query.exec();
+        };
+
+    const bool readerRoleAccountCreated =
+        createRoleTestAccount(
+            readerRoleUsername,
+            QStringLiteral("真实测试读者"),
+            QStringLiteral("reader"));
+
+    const bool librarianRoleAccountCreated =
+        createRoleTestAccount(
+            librarianRoleUsername,
+            QStringLiteral("真实测试图书管理员"),
+            QStringLiteral("librarian"));
+
+    allPassed &= check(
+        readerRoleAccountCreated
+            && librarianRoleAccountCreated,
+        QStringLiteral("创建真实角色测试账号"));
+
+    const auto readerRoleLogin =
+        AuthService::login(
+            readerRoleUsername,
+            roleTestPassword,
+            &error);
+
+    const auto librarianRoleLogin =
+        AuthService::login(
+            librarianRoleUsername,
+            roleTestPassword,
+            &error);
+
+    allPassed &= check(
+        readerRoleLogin.has_value()
+            && librarianRoleLogin.has_value(),
+        QStringLiteral("读者和馆员真实登录成功"));
+
+    if (!readerRoleLogin.has_value()
+        || !librarianRoleLogin.has_value()) {
+        Database::close();
+        return 3;
+    }
+
+    const UserSession readerSession =
+        *readerRoleLogin;
+    const UserSession librarianSession =
+        *librarianRoleLogin;
     const QVector<Permission> allPermissions = {
         Permission::ViewBooks,
         Permission::ManageBooks,
@@ -203,18 +278,6 @@ int main(int argc, char *argv[])
     allPassed &= check(
         adminHasAllPermissions,
         QStringLiteral("管理员具有全部权限"));
-
-    UserSession librarianSession;
-    librarianSession.userId = 998;
-    librarianSession.username =
-        QStringLiteral("test-librarian");
-    librarianSession.displayName =
-        QStringLiteral("测试图书管理员");
-    librarianSession.role =
-        QStringLiteral("librarian");
-    librarianSession.permissions =
-        PermissionService::permissionsForRole(
-            librarianSession.role);
 
     const bool librarianPermissionsCorrect =
         PermissionService::hasPermission(
@@ -284,6 +347,61 @@ int main(int argc, char *argv[])
             && anonymousError
                    == QStringLiteral("请先登录"),
         QStringLiteral("未登录用户调用受限操作被拒绝"));
+
+    BookService bookService;
+
+    const QVector<BookInfo> adminBooks =
+        bookService.books(
+            *admin,
+            &error);
+
+    allPassed &= check(
+        error.isEmpty(),
+        QStringLiteral(
+            "管理员可以查询图书列表"));
+
+    const QVector<AvailableCopyInfo>
+        librarianAvailableCopies =
+        bookService.availableCopies(
+            librarianSession,
+            &error);
+
+    allPassed &= check(
+        error.isEmpty(),
+        QStringLiteral(
+            "馆员可以查询可借实体册"));
+
+    const QStringList readerCategories =
+        bookService.categories(
+            readerSession,
+            &error);
+
+    const QVector<BookInfo> readerBooks =
+        bookService.books(
+            readerSession,
+            &error);
+
+    allPassed &= check(
+        error.isEmpty()
+            && !readerCategories.isEmpty()
+            && !readerBooks.isEmpty(),
+        QStringLiteral(
+            "读者可以查询图书和分类"));
+
+    const QVector<BookInfo> anonymousBooks =
+        bookService.books(
+            anonymousSession,
+            &error);
+
+    allPassed &= check(
+        anonymousBooks.isEmpty()
+            && error
+                   == QStringLiteral("请先登录"),
+        QStringLiteral(
+            "未登录用户查询图书列表被拒绝"));
+
+    Q_UNUSED(adminBooks);
+    Q_UNUSED(librarianAvailableCopies);
 
     UserService userService;
 
@@ -492,6 +610,22 @@ int main(int argc, char *argv[])
                        "账号已停用，请联系管理员"),
         QStringLiteral("停用用户不能登录"));
 
+    QString staleSessionError;
+    const bool staleSessionAllowed =
+        resetPasswordLogin.has_value()
+        && PermissionService::requirePermission(
+            *resetPasswordLogin,
+            Permission::ViewBooks,
+            &staleSessionError);
+
+    allPassed &= check(
+        !staleSessionAllowed
+            && staleSessionError
+                   == QStringLiteral(
+                       "登录状态已失效，请重新登录"),
+        QStringLiteral(
+            "账号停用后已有会话立即失效"));
+
     const auto disabledUserInfo =
         userService.getUser(
             *admin, testUserId, &error);
@@ -521,6 +655,36 @@ int main(int argc, char *argv[])
     allPassed &= check(
         enabledAccountLogin.has_value(),
         QStringLiteral("重新启用用户后可以登录"));
+
+    QString reenabledOldSessionError;
+    const bool reenabledOldSessionAllowed =
+        resetPasswordLogin.has_value()
+        && PermissionService::requirePermission(
+            *resetPasswordLogin,
+            Permission::ViewBooks,
+            &reenabledOldSessionError);
+
+    allPassed &= check(
+        !reenabledOldSessionAllowed
+            && reenabledOldSessionError
+                   == QStringLiteral(
+                       "登录状态已失效，请重新登录"),
+        QStringLiteral(
+            "重新启用后旧会话仍然失效"));
+
+    QString reenabledNewSessionError;
+    const bool reenabledNewSessionAllowed =
+        enabledAccountLogin.has_value()
+        && PermissionService::requirePermission(
+            *enabledAccountLogin,
+            Permission::ViewBooks,
+            &reenabledNewSessionError);
+
+    allPassed &= check(
+        reenabledNewSessionAllowed
+            && reenabledNewSessionError.isEmpty(),
+        QStringLiteral(
+            "重新启用后的新会话有效"));
 
     OperationLogService statusLogService;
     OperationLogQuery statusLogQuery;
@@ -588,6 +752,127 @@ int main(int argc, char *argv[])
         QStringLiteral("清理临时测试用户"));
 
     ReaderService readerService;
+
+    CirculationService circulationService;
+
+    const QVector<ActiveLoanInfo> adminActiveLoans =
+        circulationService.activeLoans(
+            *admin,
+            &error);
+
+    allPassed &= check(
+        error.isEmpty(),
+        QStringLiteral(
+            "管理员可以查询当前借阅记录"));
+
+    const QVector<ActiveLoanInfo> librarianActiveLoans =
+        circulationService.activeLoans(
+            librarianSession,
+            &error);
+
+    allPassed &= check(
+        error.isEmpty(),
+        QStringLiteral(
+            "馆员可以查询当前借阅记录"));
+
+    const QVector<ActiveLoanInfo> readerActiveLoans =
+        circulationService.activeLoans(
+            readerSession,
+            &error);
+
+    allPassed &= check(
+        readerActiveLoans.isEmpty()
+            && error == QStringLiteral("无权限"),
+        QStringLiteral(
+            "读者查询全部借阅记录被拒绝"));
+
+    StatisticsService statisticsService;
+
+    const DashboardStats adminDashboard =
+        statisticsService.dashboard(
+            *admin,
+            &error);
+
+    allPassed &= check(
+        error.isEmpty(),
+        QStringLiteral(
+            "管理员可以查询统计概览"));
+
+    const DashboardStats librarianDashboard =
+        statisticsService.dashboard(
+            librarianSession,
+            &error);
+
+    allPassed &= check(
+        error.isEmpty(),
+        QStringLiteral(
+            "馆员可以查询统计概览"));
+
+    const DashboardStats readerDashboard =
+        statisticsService.dashboard(
+            readerSession,
+            &error);
+
+    allPassed &= check(
+        error == QStringLiteral("无权限"),
+        QStringLiteral(
+            "读者查询全局统计概览被拒绝"));
+
+    const QVector<LoanHistoryInfo> adminHistory =
+        statisticsService.loanHistory(
+            *admin,
+            20,
+            &error);
+
+    allPassed &= check(
+        error.isEmpty(),
+        QStringLiteral(
+            "管理员可以查询借阅历史"));
+
+    const QVector<LoanHistoryInfo> librarianHistory =
+        statisticsService.loanHistory(
+            librarianSession,
+            20,
+            &error);
+
+    allPassed &= check(
+        error.isEmpty(),
+        QStringLiteral(
+            "馆员可以查询借阅历史"));
+
+    const QVector<LoanHistoryInfo> readerHistory =
+        statisticsService.loanHistory(
+            readerSession,
+            20,
+            &error);
+
+    allPassed &= check(
+        readerHistory.isEmpty()
+            && error == QStringLiteral("无权限"),
+        QStringLiteral(
+            "读者查询全部借阅历史被拒绝"));
+
+    const bool readerExportedHistory =
+        statisticsService.exportCsv(
+            readerSession,
+            QStringLiteral(
+                "unauthorized-history.csv"),
+            &error);
+
+    allPassed &= check(
+        !readerExportedHistory
+            && error == QStringLiteral("无权限"),
+        QStringLiteral(
+            "读者导出全部借阅历史被拒绝"));
+
+    Q_UNUSED(adminDashboard);
+    Q_UNUSED(librarianDashboard);
+    Q_UNUSED(readerDashboard);
+    Q_UNUSED(adminHistory);
+    Q_UNUSED(librarianHistory);
+
+    Q_UNUSED(adminActiveLoans);
+    Q_UNUSED(librarianActiveLoans);
 
     const QString testReaderNo =
         QStringLiteral("R-UPDATE-%1").arg(temporarySuffix);
@@ -744,6 +1029,91 @@ int main(int argc, char *argv[])
         readerUpdateStored,
         QStringLiteral("读者修改结果已保存"));
 
+    ReaderQuery readerNoFilter;
+    readerNoFilter.readerNo = updatedReaderNo;
+
+    const QVector<ReaderInfo> readerNoResults =
+        readerService.readers(
+            *admin,
+            readerNoFilter,
+            &error);
+
+    bool foundByReaderNo = false;
+    for (const ReaderInfo &item : readerNoResults) {
+        if (item.id == testReaderId) {
+            foundByReaderNo = true;
+            break;
+        }
+    }
+
+    allPassed &= check(
+        foundByReaderNo,
+        QStringLiteral("按读者证号筛选成功"));
+
+    ReaderQuery readerNameFilter;
+    readerNameFilter.name =
+        QStringLiteral("修改后读者");
+
+    const QVector<ReaderInfo> readerNameResults =
+        readerService.readers(
+            *admin,
+            readerNameFilter,
+            &error);
+
+    bool foundByReaderName = false;
+    for (const ReaderInfo &item : readerNameResults) {
+        if (item.id == testReaderId) {
+            foundByReaderName = true;
+            break;
+        }
+    }
+
+    allPassed &= check(
+        foundByReaderName,
+        QStringLiteral("按读者姓名筛选成功"));
+
+    const auto readerDetail =
+        readerService.getReader(
+            *admin,
+            testReaderId,
+            &error);
+
+    allPassed &= check(
+        readerDetail.has_value()
+            && readerDetail->info.id == testReaderId
+            && readerDetail->info.readerNo
+                   == updatedReaderNo
+            && readerDetail->info.name
+                   == QStringLiteral("修改后读者")
+            && readerDetail->info.enabled
+            && readerDetail->totalLoans == 0
+            && readerDetail->info.activeLoans == 0
+            && readerDetail->returnedLoans == 0
+            && readerDetail->overdueLoans == 0,
+        QStringLiteral("查询单个读者详情成功"));
+
+    const auto unauthorizedReaderDetail =
+        readerService.getReader(
+            readerSession,
+            testReaderId,
+            &error);
+
+    allPassed &= check(
+        !unauthorizedReaderDetail.has_value()
+            && error == QStringLiteral("无权限"),
+        QStringLiteral("读者角色查询读者详情被拒绝"));
+
+    const auto missingReaderDetail =
+        readerService.getReader(
+            *admin,
+            2147483647,
+            &error);
+
+    allPassed &= check(
+        !missingReaderDetail.has_value()
+            && error == QStringLiteral("读者不存在"),
+        QStringLiteral("不存在的读者详情被正确拒绝"));
+
     OperationLogQuery readerUpdateLogQuery;
     readerUpdateLogQuery.actionType =
         QStringLiteral("READER_UPDATE");
@@ -804,6 +1174,20 @@ int main(int argc, char *argv[])
         statusTestLoanCreated,
         QStringLiteral("创建读者未归还借阅测试数据"));
 
+    const auto borrowedReaderDetail =
+        readerService.getReader(
+            *admin,
+            testReaderId,
+            &error);
+
+    allPassed &= check(
+        borrowedReaderDetail.has_value()
+            && borrowedReaderDetail->totalLoans == 1
+            && borrowedReaderDetail->info.activeLoans == 1
+            && borrowedReaderDetail->returnedLoans == 0
+            && borrowedReaderDetail->overdueLoans == 0,
+        QStringLiteral("读者详情包含当前借阅概况"));
+
     const auto eligibilityOriginalLimit =
         params.getIntParam(
             QStringLiteral("borrow_limit"),
@@ -832,6 +1216,21 @@ int main(int argc, char *argv[])
             && limitEligibility.reason
                    == QStringLiteral("已达到借阅上限"),
         QStringLiteral("达到借阅上限时无借阅资格"));
+
+    const bool borrowedAtLimit =
+        circulationService.borrowBook(
+            *admin,
+            updatedReaderNo,
+            statusTestCopyId,
+            &error);
+
+    allPassed &= check(
+        !borrowedAtLimit
+            && error
+                   == QStringLiteral(
+                       "已达到借阅上限"),
+        QStringLiteral(
+            "实际借书入口拒绝达到上限的读者"));
 
     bool eligibilityLimitRestored = false;
     if (eligibilityOriginalLimit.has_value()) {
@@ -901,6 +1300,34 @@ int main(int argc, char *argv[])
         disabledStateStored,
         QStringLiteral("读者停用状态已保存"));
 
+    ReaderQuery disabledReaderFilter;
+    disabledReaderFilter.enabled = false;
+
+    const QVector<ReaderInfo> disabledReaderResults =
+        readerService.readers(
+            *admin,
+            disabledReaderFilter,
+            &error);
+
+    bool foundDisabledReader = false;
+    bool disabledFilterCorrect = true;
+
+    for (const ReaderInfo &item :
+         disabledReaderResults) {
+        if (item.enabled) {
+            disabledFilterCorrect = false;
+        }
+
+        if (item.id == testReaderId) {
+            foundDisabledReader = true;
+        }
+    }
+
+    allPassed &= check(
+        disabledFilterCorrect
+            && foundDisabledReader,
+        QStringLiteral("按停用状态筛选读者成功"));
+
     const ReaderEligibilityResult disabledEligibility =
         readerService.checkReaderEligibility(
             *admin, testReaderId, &error);
@@ -911,6 +1338,21 @@ int main(int argc, char *argv[])
             && disabledEligibility.reason
                    == QStringLiteral("读者已停用"),
         QStringLiteral("停用读者无借阅资格"));
+
+    const bool disabledReaderBorrowed =
+        circulationService.borrowBook(
+            *admin,
+            updatedReaderNo,
+            statusTestCopyId,
+            &error);
+
+    allPassed &= check(
+        !disabledReaderBorrowed
+            && error
+                   == QStringLiteral(
+                       "读者已停用"),
+        QStringLiteral(
+            "实际借书入口拒绝停用读者"));
 
     const bool readerRoleEnabledReader =
         readerService.setReaderStatus(
@@ -1054,6 +1496,21 @@ int main(int argc, char *argv[])
                    == QStringLiteral("关联账号已停用"),
         QStringLiteral("关联账号停用后读者无借阅资格"));
 
+    const bool disabledAccountBorrowed =
+        circulationService.borrowBook(
+            *admin,
+            linkedReaderNo,
+            statusTestCopyId,
+            &error);
+
+    allPassed &= check(
+        !disabledAccountBorrowed
+            && error
+                   == QStringLiteral(
+                       "关联账号已停用"),
+        QStringLiteral(
+            "实际借书入口拒绝关联账号停用的读者"));
+
     const bool linkedUserEnabled =
         userService.setUserStatus(
             *admin,
@@ -1146,6 +1603,232 @@ int main(int argc, char *argv[])
             && linkedReaderCleaned
             && linkedUserCleaned,
         QStringLiteral("清理账号与读者关联测试数据"));
+
+    const auto originalBorrowPeriod =
+        params.getIntParam(
+            QStringLiteral("borrow_period_days"),
+            &error);
+
+    const bool testBorrowPeriodSet =
+        originalBorrowPeriod.has_value()
+        && params.setParam(
+            *admin,
+            QStringLiteral("borrow_period_days"),
+            QStringLiteral("7"),
+            &error);
+
+    allPassed &= check(
+        testBorrowPeriodSet,
+        QStringLiteral("设置测试借阅期限为7天"));
+
+    const QString periodReaderNo =
+        QStringLiteral("R-PERIOD-%1")
+            .arg(temporarySuffix);
+    const QString periodIsbn =
+        QStringLiteral("ISBN-PERIOD-%1")
+            .arg(temporarySuffix);
+
+    const bool periodReaderCreated =
+        readerService.addReader(
+            *admin,
+            periodReaderNo,
+            QStringLiteral("借阅期限测试读者"),
+            QStringLiteral("13000000007"),
+            &error);
+
+    const bool periodBookCreated =
+        bookService.addBook(
+            *admin,
+            QStringLiteral("借阅期限测试图书"),
+            QStringLiteral("测试作者"),
+            periodIsbn,
+            QStringLiteral("计算机"),
+            1,
+            &error);
+
+    allPassed &= check(
+        periodReaderCreated
+            && periodBookCreated,
+        QStringLiteral("创建借阅期限测试数据"));
+
+    QSqlQuery periodIdsQuery(
+        Database::connection());
+    periodIdsQuery.prepare(QStringLiteral(
+        "SELECT r.id, b.id, bc.id "
+        "FROM readers r "
+        "JOIN books b ON b.isbn = ? "
+        "JOIN book_copies bc ON bc.book_id = b.id "
+        "WHERE r.reader_no = ? "
+        "ORDER BY bc.id LIMIT 1"));
+    periodIdsQuery.addBindValue(periodIsbn);
+    periodIdsQuery.addBindValue(periodReaderNo);
+
+    const bool periodIdsFound =
+        periodIdsQuery.exec()
+        && periodIdsQuery.next();
+
+    const int periodReaderId =
+        periodIdsFound
+            ? periodIdsQuery.value(0).toInt()
+            : 0;
+    const int periodBookId =
+        periodIdsFound
+            ? periodIdsQuery.value(1).toInt()
+            : 0;
+    const int periodCopyId =
+        periodIdsFound
+            ? periodIdsQuery.value(2).toInt()
+            : 0;
+
+    allPassed &= check(
+        periodReaderId > 0
+            && periodBookId > 0
+            && periodCopyId > 0,
+        QStringLiteral("查询到借阅期限测试数据"));
+
+    const bool periodBookBorrowed =
+        circulationService.borrowBook(
+            *admin,
+            periodReaderNo,
+            periodCopyId,
+            &error);
+
+    allPassed &= check(
+        periodBookBorrowed,
+        QStringLiteral("使用修改后的期限办理借阅"));
+
+    QSqlQuery periodLoanQuery(
+        Database::connection());
+    periodLoanQuery.prepare(QStringLiteral(
+        "SELECT id, "
+        "DATEDIFF(due_at, borrowed_at) "
+        "FROM loans "
+        "WHERE reader_id = ? "
+        "AND copy_id = ? "
+        "AND returned_at IS NULL "
+        "ORDER BY id DESC LIMIT 1"));
+    periodLoanQuery.addBindValue(periodReaderId);
+    periodLoanQuery.addBindValue(periodCopyId);
+
+    const bool periodLoanFound =
+        periodLoanQuery.exec()
+        && periodLoanQuery.next();
+
+    const int periodLoanId =
+        periodLoanFound
+            ? periodLoanQuery.value(0).toInt()
+            : 0;
+    const int actualBorrowDays =
+        periodLoanFound
+            ? periodLoanQuery.value(1).toInt()
+            : 0;
+
+    allPassed &= check(
+        periodLoanId > 0
+            && actualBorrowDays == 7,
+        QStringLiteral(
+            "修改借阅期限后应还日期同步变化"));
+
+    const bool periodBookReturned =
+        circulationService.returnBook(
+            *admin,
+            periodLoanId,
+            &error);
+
+    allPassed &= check(
+        periodBookReturned,
+        QStringLiteral("归还借阅期限测试图书"));
+
+    auto operationLogExists =
+        [&](const QString &actionType,
+            const QString &targetId) {
+            OperationLogQuery query;
+            query.actionType = actionType;
+            query.page = 1;
+            query.pageSize = 200;
+
+            const OperationLogPage page =
+                userLogService.listLogs(
+                    *admin,
+                    query,
+                    &error);
+
+            for (const OperationLogInfo &item :
+                 page.items) {
+                if (item.targetId == targetId) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+    allPassed &= check(
+        operationLogExists(
+            QStringLiteral("BOOK_CREATE"),
+            QString::number(periodBookId)),
+        QStringLiteral("图书新增自动写入操作日志"));
+
+    allPassed &= check(
+        operationLogExists(
+            QStringLiteral("LOAN_BORROW"),
+            QString::number(periodLoanId)),
+        QStringLiteral("借阅自动写入操作日志"));
+
+    allPassed &= check(
+        operationLogExists(
+            QStringLiteral("LOAN_RETURN"),
+            QString::number(periodLoanId)),
+        QStringLiteral("归还自动写入操作日志"));
+
+    bool borrowPeriodRestored = false;
+    if (originalBorrowPeriod.has_value()) {
+        borrowPeriodRestored =
+            params.setParam(
+                *admin,
+                QStringLiteral("borrow_period_days"),
+                QString::number(
+                    *originalBorrowPeriod),
+                &error);
+    }
+
+    allPassed &= check(
+        borrowPeriodRestored,
+        QStringLiteral("恢复原借阅期限"));
+
+    QSqlQuery cleanupPeriodData(
+        Database::connection());
+
+    cleanupPeriodData.prepare(QStringLiteral(
+        "DELETE FROM loans WHERE id = ?"));
+    cleanupPeriodData.addBindValue(periodLoanId);
+    const bool periodLoanCleaned =
+        cleanupPeriodData.exec();
+
+    cleanupPeriodData.prepare(QStringLiteral(
+        "DELETE FROM readers WHERE id = ?"));
+    cleanupPeriodData.addBindValue(periodReaderId);
+    const bool periodReaderCleaned =
+        cleanupPeriodData.exec();
+
+    cleanupPeriodData.prepare(QStringLiteral(
+        "DELETE FROM book_copies "
+        "WHERE book_id = ?"));
+    cleanupPeriodData.addBindValue(periodBookId);
+    const bool periodCopiesCleaned =
+        cleanupPeriodData.exec();
+
+    cleanupPeriodData.prepare(QStringLiteral(
+        "DELETE FROM books WHERE id = ?"));
+    cleanupPeriodData.addBindValue(periodBookId);
+    const bool periodBookCleaned =
+        cleanupPeriodData.exec();
+
+    allPassed &= check(
+        periodLoanCleaned
+            && periodReaderCleaned
+            && periodCopiesCleaned
+            && periodBookCleaned,
+        QStringLiteral("清理借阅期限测试数据"));
 
     const bool readerChangedParam = params.setParam(
         readerSession,
@@ -1284,6 +1967,24 @@ int main(int argc, char *argv[])
         !logoutSession.isAuthenticated()
             && logoutSession.permissions.isEmpty(),
         QStringLiteral("退出后会话已清空"));
+
+    QSqlQuery cleanupRoleAccounts(
+        Database::connection());
+    cleanupRoleAccounts.prepare(QStringLiteral(
+        "DELETE FROM users "
+        "WHERE username = ? OR username = ?"));
+    cleanupRoleAccounts.addBindValue(
+        readerRoleUsername);
+    cleanupRoleAccounts.addBindValue(
+        librarianRoleUsername);
+
+    const bool roleAccountsCleaned =
+        cleanupRoleAccounts.exec()
+        && cleanupRoleAccounts.numRowsAffected() >= 2;
+
+    allPassed &= check(
+        roleAccountsCleaned,
+        QStringLiteral("清理真实角色测试账号"));
 
     Database::close();
 

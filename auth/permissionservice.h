@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QtGlobal>
 #include <QVector>
 
 struct UserSession;
@@ -30,4 +31,10 @@ public:
     static bool requirePermission(const UserSession &session,
                                   Permission permission,
                                   QString *error);
+
+    static quint64 currentSessionGeneration(
+        int userId);
+
+    static void invalidateUserSessions(
+        int userId);
 };

@@ -10,6 +10,7 @@ struct UserSession
     QString displayName;
     QString role;
     QVector<Permission> permissions;
+    quint64 generation = 0;
 
     bool isAuthenticated() const
     {
@@ -38,6 +39,7 @@ struct UserSession
         displayName.clear();
         role.clear();
         permissions.clear();
+        generation = 0;
     }
 };
 

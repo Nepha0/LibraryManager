@@ -28,5 +28,7 @@ public:
     bool returnBook(const UserSession &session,
                     int loanId,
                     QString *error);
-    QVector<ActiveLoanInfo> activeLoans(QString *error) const;
+    QVector<ActiveLoanInfo> activeLoans(
+        const UserSession &session,
+        QString *error) const;
 };

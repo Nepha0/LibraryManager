@@ -77,6 +77,10 @@ std::optional<UserSession> AuthService::login(const QString &username,
     session.role = query.value(5).toString();
     session.permissions = PermissionService::permissionsForRole(session.role);
 
+    session.generation =
+        PermissionService::currentSessionGeneration(
+            session.userId);
+
     if (error) {
         error->clear();
     }
