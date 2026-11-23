@@ -87,7 +87,7 @@ INSERT IGNORE INTO system_params
 VALUES
     ('borrow_period_days', '30', '借阅期限，单位为天'),
     ('borrow_limit', '5', '每名读者最大借阅数量'),
-    ('max_renew_times', '1', '每条借阅记录最大续借次数'),
+    ('max_renew_times', '2', '每条借阅记录最大续借次数'),
     ('reservation_hold_days', '3', '预约待取保留期限，单位为天'),
     ('renew_period_days', '15', '每次续借延长天数');
 

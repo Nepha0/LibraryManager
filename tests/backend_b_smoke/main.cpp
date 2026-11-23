@@ -1142,7 +1142,7 @@ int main(int argc, char *argv[])
         Database::connection());
     const bool availableCopyFound =
         availableCopyQuery.exec(QStringLiteral(
-            "SELECT bc.id "
+            "SELECT bc.id, bc.book_id "
             "FROM book_copies bc "
             "LEFT JOIN loans l "
             "ON l.copy_id = bc.id "
@@ -1155,16 +1155,21 @@ int main(int argc, char *argv[])
         availableCopyFound
             ? availableCopyQuery.value(0).toInt()
             : 0;
+    const int statusTestBookId =
+        availableCopyFound
+            ? availableCopyQuery.value(1).toInt()
+            : 0;
 
     QSqlQuery createStatusTestLoan(
         Database::connection());
     createStatusTestLoan.prepare(QStringLiteral(
         "INSERT INTO loans ("
-        "copy_id, reader_id, borrowed_at, due_at) "
-        "VALUES (?, ?, CURRENT_TIMESTAMP, "
-        "TIMESTAMPADD(DAY, 30, CURRENT_TIMESTAMP))"));
+        "copy_id, reader_id, book_id, borrowed_at, due_at) "
+        "VALUES (?, ?, ?, CURRENT_DATE, "
+        "DATE_ADD(CURRENT_DATE, INTERVAL 30 DAY))"));
     createStatusTestLoan.addBindValue(statusTestCopyId);
     createStatusTestLoan.addBindValue(testReaderId);
+    createStatusTestLoan.addBindValue(statusTestBookId);
 
     const bool statusTestLoanCreated =
         statusTestCopyId > 0
@@ -1526,7 +1531,7 @@ int main(int argc, char *argv[])
         Database::connection());
     const bool linkedCopyFound =
         linkedCopyQuery.exec(QStringLiteral(
-            "SELECT bc.id "
+            "SELECT bc.id, bc.book_id "
             "FROM book_copies bc "
             "LEFT JOIN loans l "
             "ON l.copy_id = bc.id "
@@ -1539,16 +1544,21 @@ int main(int argc, char *argv[])
         linkedCopyFound
             ? linkedCopyQuery.value(0).toInt()
             : 0;
+    const int linkedBookId =
+        linkedCopyFound
+            ? linkedCopyQuery.value(1).toInt()
+            : 0;
 
     QSqlQuery createLinkedLoan(
         Database::connection());
     createLinkedLoan.prepare(QStringLiteral(
         "INSERT INTO loans ("
-        "copy_id, reader_id, borrowed_at, due_at) "
-        "VALUES (?, ?, CURRENT_TIMESTAMP, "
-        "TIMESTAMPADD(DAY, 30, CURRENT_TIMESTAMP))"));
+        "copy_id, reader_id, book_id, borrowed_at, due_at) "
+        "VALUES (?, ?, ?, CURRENT_DATE, "
+        "DATE_ADD(CURRENT_DATE, INTERVAL 30 DAY))"));
     createLinkedLoan.addBindValue(linkedCopyId);
     createLinkedLoan.addBindValue(linkedReaderId);
+    createLinkedLoan.addBindValue(linkedBookId);
 
     const bool linkedLoanCreated =
         linkedCopyId > 0

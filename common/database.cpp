@@ -89,8 +89,8 @@ bool Database::open(bool smokeTest, QString *error)
                        "SELECT COUNT(*) FROM information_schema.tables "
                        "WHERE table_schema = DATABASE() AND table_name IN ("
                        "'users','readers','system_params','operation_logs',"
-                       "'categories','books','book_copies','loans')"))
-                   || !query.next() || query.value(0).toInt() != 8) {
+                       "'categories','books','book_copies','loans','reservations')"))
+                   || !query.next() || query.value(0).toInt() != 9) {
             validationError = QStringLiteral("%1 尚未初始化。请运行 scripts/init-mysql.ps1%2。")
                                   .arg(expectedSchema, smokeTest ? QStringLiteral(" -Smoke") : QString());
         }

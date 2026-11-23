@@ -35,13 +35,30 @@ try {
         $command.CommandText = "SET SESSION character_set_client = 'utf8mb4', character_set_connection = 'utf8mb4'"
         [void]$command.ExecuteNonQuery()
         $directory = Join-Path (Split-Path -Parent $PSScriptRoot) 'database/migrations/mysql'
-        foreach ($name in @('001_backend_b.sql', '002_demo_catalog.sql')) {
+        foreach ($name in @('001_backend_b.sql', '002_demo_catalog.sql', '003_unified_schema_v1.sql')) {
             $content = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $directory $name)
             $content = $content -replace '(?m)^\s*--[^\r\n]*', ''
             foreach ($statement in ($content -split '(?m);[ \t]*\r?$')) {
                 if ([string]::IsNullOrWhiteSpace($statement)) { continue }
+                $sql = $statement.Trim()
+
+                # MySQL ODBC rejects SET NAMES. The connection character set
+                # has already been configured above, so this directive is redundant.
+                if ($sql -match '^SET\s+NAMES\b') {
+                    continue
+                }
+
+                # The unified-schema migration performs conditional DDL with its
+                # own prepared statements. MySQL does not permit nesting those
+                # statements inside the UTF-8 wrapper used below.
+                if ($sql -match '^(PREPARE|EXECUTE|DEALLOCATE|SET)\b') {
+                    $command.CommandText = $sql
+                    [void]$command.ExecuteNonQuery()
+                    continue
+                }
+
                 # Pass UTF-8 bytes as ASCII so ANSI ODBC drivers preserve Chinese seed text.
-                $bytes = [Text.Encoding]::UTF8.GetBytes($statement.Trim())
+                $bytes = [Text.Encoding]::UTF8.GetBytes($sql)
                 $hex = [BitConverter]::ToString($bytes).Replace('-', '')
                 $command.CommandText = "SET @library_migration_sql = CONVERT(0x$hex USING utf8mb4)"
                 [void]$command.ExecuteNonQuery()

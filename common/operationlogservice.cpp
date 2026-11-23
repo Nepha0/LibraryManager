@@ -40,11 +40,15 @@ bool OperationLogService::record(
     QSqlQuery query(Database::connection());
     query.prepare(QStringLiteral(
         "INSERT INTO operation_logs ("
-        "operator_user_id, action_type, target_type, "
+        "operator_user_id, operator_name, action_type, target_type, "
         "target_id, detail) "
-        "VALUES (?, ?, ?, ?, ?)"));
+        "VALUES (?, ?, ?, ?, ?, ?)"));
 
     query.addBindValue(session.userId);
+    query.addBindValue(
+        session.displayName.trimmed().isEmpty()
+            ? session.username
+            : session.displayName);
     query.addBindValue(normalizedAction);
     query.addBindValue(normalizedTarget);
     query.addBindValue(targetId.trimmed());
@@ -145,7 +149,7 @@ OperationLogPage OperationLogService::listLogs(
             "SELECT "
             "ol.id, "
             "COALESCE(ol.operator_user_id, 0), "
-            "COALESCE(u.display_name, u.username, '系统'), "
+            "COALESCE(ol.operator_name, u.display_name, u.username, '系统'), "
             "ol.action_type, "
             "ol.target_type, "
             "COALESCE(ol.target_id, ''), "
