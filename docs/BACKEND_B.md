@@ -173,7 +173,10 @@ Qt 通过 `QODBC` 和 64 位用户或系统 DSN 连接 MySQL。DSN 指向 `libra
 - `USER_UPDATE`
 - `USER_PASSWORD_RESET`
 - `USER_ROLE_ASSIGN`
-- 后续读者模块将增加 `READER_CREATE`、`READER_UPDATE` 等类型
+- `USER_STATUS_UPDATE`
+- `READER_CREATE`
+- `READER_UPDATE`
+- `READER_STATUS_UPDATE`
 
 ### 4.5 UserService
 
@@ -193,16 +196,51 @@ Qt 通过 `QODBC` 和 64 位用户或系统 DSN 连接 MySQL。DSN 指向 `libra
 - 分配角色
 - 禁止管理员取消自己的管理员角色
 - 关键操作与操作日志同事务
+- 启用和停用账号
 
-尚未实现：
+接口：
 
-- `setUserStatus()`
+- `addUser(session, username, displayName, password, role, error)`
+- `updateUser(session, userId, username, displayName, error)`
+- `resetPassword(session, userId, newPassword, error)`
+- `assignRole(session, userId, role, error)`
+- `setUserStatus(session, userId, enabled, error)`
+- `getUser(session, userId, error)`
+- `listUsers(session, query, error)`
 
-原因：禁用账号前必须检查关联读者是否仍有未完成借阅，该规则依赖后端 C 的借阅表。
+账号状态规则：
+
+- 仅管理员可以管理用户账号
+- 管理员不能停用当前登录账号
+- 关联读者存在未归还借阅时，不能停用账号
+- 停用账号不能登录
+- 状态修改与操作日志写入使用同一事务
 
 ### 4.6 ReaderService
 
-当前集成版支持登记读者、列出读者和查询当前借阅数。借书时检查读者是否停用及是否达到系统借阅额度。读者资料编辑、状态管理和预约资格仍待开发。
+文件：
+
+    readers/readerservice.h
+    readers/readerservice.cpp
+
+接口：
+
+- `addReader(session, readerNo, name, phone, error)`
+- `updateReader(session, readerId, readerNo, name, phone, error)`
+- `setReaderStatus(session, readerId, enabled, error)`
+- `checkReaderEligibility(session, readerId, error)`
+- `readers(session, error)`
+
+已实现：
+
+- 新增、修改和查询读者资料
+- 读者证号唯一性校验
+- 启用和停用读者
+- 存在未归还借阅时禁止停用读者
+- 查询当前未归还借阅数量
+- 根据读者状态、关联账号状态和 `borrow_limit` 判断借阅资格
+- 读者查询、修改和状态管理的业务层权限校验
+- 新增、修改和状态变更自动写入操作日志
 
 ## 5. 后端 B 冒烟测试
 
@@ -241,40 +279,42 @@ Qt Creator 运行方法：
 - 密码重置
 - 角色分配
 - 用户操作日志
+- 用户账号启用和停用
+- 禁止管理员停用当前登录账号
+- 关联读者有未归还借阅时禁止停用账号
+- 读者新增、修改、查询和启用停用
+- 重复读者证号校验
+- 有未归还借阅时禁止停用读者
+- 正常、停用、关联账号停用和达到上限时的借阅资格判断
+- 读者新增、修改和状态变更日志
 - 临时测试数据清理
 
 测试会临时修改 `borrow_limit`，完成后自动恢复原值。
 
-测试会创建临时用户，完成后自动删除。操作日志按业务要求保留。
+测试会创建临时用户、读者和借阅记录，完成后自动清理。操作日志按业务要求保留。
 
-## 6. 待后端 C 确认的契约
+## 6. 与后端 C 的已确认契约
 
-后端 B 需要后端 C 提供最终 MySQL 建表 SQL，至少确认：
+后端 C 的核心借阅表已经由以下脚本提供：
 
-### loans
+    database/migrations/mysql/002_demo_catalog.sql
+
+`loans` 表当前包含：
 
 - `reader_id`
+- `copy_id`
 - `borrowed_at`
 - `due_at`
-- `returned_at` 或借阅状态字段
-- 续借次数字段
+- `returned_at`
 
-### reservations
+后端 B 已基于该表实现：
 
-- `reader_id`
-- 预约状态
-- 申请时间
-- 待取截止时间
+- 当前未归还借阅数量查询
+- 有未归还借阅时禁止停用读者
+- 有未归还借阅时禁止停用关联账号
+- 根据借阅数量上限判断借阅资格
 
-后端 B 将据此实现：
-
-- 当前借阅数
-- 逾期数
-- 预约数
-- `checkReaderEligibility()`
-- 读者状态限制
-- 用户账号禁用限制
-- 读者完整详情
+当前数据库尚未提供 `reservations` 表。现阶段后端 B 功能清单中的借阅资格仅判断读者状态、关联账号状态和借阅数量上限，因此不依赖预约表。未来增加预约业务时，需要与后端 C 重新确认预约状态字段和查询接口。
 
 ## 7. 前端接入状态
 
@@ -287,5 +327,5 @@ Qt Creator 运行方法：
 - 所有测试数据使用临时虚构数据。
 - 参数和账号关键修改必须记录操作日志。
 - 不使用 `git add .`，避免混入未完成文件。
-- 后端 C 表结构未确认前，不猜测借阅或预约字段。
+- 未确认的新业务表和字段不得自行猜测，必须先与对应模块负责人确认。
 - 前端接口未确认前，不伪造已废弃的读者类别兼容逻辑。

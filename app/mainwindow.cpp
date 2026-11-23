@@ -834,7 +834,7 @@ void MainWindow::refreshCirculation()
 void MainWindow::refreshReaders()
 {
     QString error;
-    const auto readers = m_readerService.readers(&error);
+    const auto readers = m_readerService.readers(m_session, &error);
     m_readersTable->setRowCount(readers.size());
     for (int row = 0; row < readers.size(); ++row) {
         const auto &reader = readers.at(row);
