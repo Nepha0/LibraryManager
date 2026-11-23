@@ -35,7 +35,13 @@ public:
                  const QString &category,
                  int copyCount,
                  QString *error);
-    QVector<BookInfo> books(QString *error) const;
-    QStringList categories(QString *error) const;
-    QVector<AvailableCopyInfo> availableCopies(QString *error) const;
+    QVector<BookInfo> books(
+        const UserSession &session,
+        QString *error) const;
+    QStringList categories(
+        const UserSession &session,
+        QString *error) const;
+    QVector<AvailableCopyInfo> availableCopies(
+        const UserSession &session,
+        QString *error) const;
 };

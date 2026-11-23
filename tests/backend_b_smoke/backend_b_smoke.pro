@@ -15,11 +15,19 @@ SOURCES += main.cpp \
            ../../auth/permissionservice.cpp \
            ../../common/paramservice.cpp \
            ../../common/operationlogservice.cpp \
-           ../../auth/userservice.cpp
+           ../../auth/userservice.cpp \
+           ../../readers/readerservice.cpp \
+           ../../circulation/circulationservice.cpp \
+           ../../statistics/statisticsservice.cpp \
+           ../../books/bookservice.cpp
 
 HEADERS += ../../common/database.h \
            ../../auth/authservice.h \
            ../../auth/permissionservice.h \
            ../../common/paramservice.h \
            ../../common/operationlogservice.h \
-           ../../auth/userservice.h
+           ../../auth/userservice.h \
+           ../../readers/readerservice.h \
+           ../../circulation/circulationservice.h \
+           ../../statistics/statisticsservice.h \
+           ../../books/bookservice.h

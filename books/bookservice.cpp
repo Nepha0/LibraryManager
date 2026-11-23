@@ -1,6 +1,7 @@
 #include "bookservice.h"
 
 #include "../common/database.h"
+#include "../common/operationlogservice.h"
 
 #include <QSqlDatabase>
 #include <QSqlError>
@@ -91,6 +92,29 @@ bool BookService::addBook(const UserSession &session,
         }
     }
 
+    OperationLogService logService;
+    QString logError;
+
+    if (!logService.record(
+            session,
+            QStringLiteral("BOOK_CREATE"),
+            QStringLiteral("book"),
+            QString::number(bookId),
+            QStringLiteral(
+                "新增图书《%1》，ISBN %2，复本数 %3")
+                .arg(title.trimmed(),
+                     isbn.trimmed(),
+                     QString::number(copyCount)),
+            &logError)) {
+        database.rollback();
+
+        if (error) {
+            *error = QStringLiteral(
+                "新增图书失败：无法记录操作日志");
+        }
+        return false;
+    }
+
     if (!database.commit()) {
         if (error) {
             *error = database.lastError().text();
@@ -98,12 +122,24 @@ bool BookService::addBook(const UserSession &session,
         database.rollback();
         return false;
     }
+    if (error) {
+        error->clear();
+    }
     return true;
 }
 
-QVector<BookInfo> BookService::books(QString *error) const
+QVector<BookInfo> BookService::books(
+    const UserSession &session,
+    QString *error) const
 {
     QVector<BookInfo> result;
+
+    if (!PermissionService::requirePermission(
+            session,
+            Permission::ViewBooks,
+            error)) {
+        return result;
+    }
     QSqlQuery query(Database::connection());
     const QString sql = QStringLiteral(
         "SELECT b.id, b.isbn, b.title, b.author, "
@@ -131,12 +167,24 @@ QVector<BookInfo> BookService::books(QString *error) const
         book.availableCopies = query.value(6).toInt();
         result.append(book);
     }
+    if (error) {
+        error->clear();
+    }
     return result;
 }
 
-QStringList BookService::categories(QString *error) const
+QStringList BookService::categories(
+    const UserSession &session,
+    QString *error) const
 {
     QStringList result;
+
+    if (!PermissionService::requirePermission(
+            session,
+            Permission::ViewBooks,
+            error)) {
+        return result;
+    }
     QSqlQuery query(Database::connection());
     if (!query.exec(QStringLiteral("SELECT name FROM categories ORDER BY id"))) {
         if (error) {
@@ -147,12 +195,24 @@ QStringList BookService::categories(QString *error) const
     while (query.next()) {
         result.append(query.value(0).toString());
     }
+    if (error) {
+        error->clear();
+    }
     return result;
 }
 
-QVector<AvailableCopyInfo> BookService::availableCopies(QString *error) const
+QVector<AvailableCopyInfo> BookService::availableCopies(
+    const UserSession &session,
+    QString *error) const
 {
     QVector<AvailableCopyInfo> result;
+
+    if (!PermissionService::requirePermission(
+            session,
+            Permission::ViewBooks,
+            error)) {
+        return result;
+    }
     QSqlQuery query(Database::connection());
     if (!query.exec(QStringLiteral(
             "SELECT bc.id, bc.copy_code, b.title, b.author "
@@ -172,6 +232,9 @@ QVector<AvailableCopyInfo> BookService::availableCopies(QString *error) const
         copy.title = query.value(2).toString();
         copy.author = query.value(3).toString();
         result.append(copy);
+    }
+    if (error) {
+        error->clear();
     }
     return result;
 }

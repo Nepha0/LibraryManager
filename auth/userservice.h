@@ -60,6 +60,11 @@ public:
                     const QString &role,
                     QString *error);
 
+    bool setUserStatus(const UserSession &session,
+                       qlonglong userId,
+                       bool enabled,
+                       QString *error);
+
     std::optional<UserInfo> getUser(
         const UserSession &session,
         qlonglong userId,

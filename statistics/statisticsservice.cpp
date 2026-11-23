@@ -1,5 +1,6 @@
 #include "statisticsservice.h"
 
+#include "../auth/permissionservice.h"
 #include "../common/database.h"
 
 #include <QDateTime>
@@ -17,9 +18,18 @@ QString csvCell(QString value)
 }
 }
 
-DashboardStats StatisticsService::dashboard(QString *error) const
+DashboardStats StatisticsService::dashboard(
+    const UserSession &session,
+    QString *error) const
 {
     DashboardStats stats;
+
+    if (!PermissionService::requirePermission(
+            session,
+            Permission::ManageCirculation,
+            error)) {
+        return stats;
+    }
     QSqlQuery query(Database::connection());
     if (!query.exec(QStringLiteral(
             "SELECT "
@@ -44,13 +54,27 @@ DashboardStats StatisticsService::dashboard(QString *error) const
         stats.overdueLoans = query.value(4).toInt();
         stats.readers = query.value(5).toInt();
     }
+    if (error) {
+        error->clear();
+    }
+
     return stats;
 }
 
 QVector<LoanHistoryInfo>
-StatisticsService::loanHistory(int limit, QString *error) const
+StatisticsService::loanHistory(
+    const UserSession &session,
+    int limit,
+    QString *error) const
 {
     QVector<LoanHistoryInfo> result;
+
+    if (!PermissionService::requirePermission(
+            session,
+            Permission::ManageCirculation,
+            error)) {
+        return result;
+    }
     QSqlQuery query(Database::connection());
     query.prepare(QStringLiteral(
         "SELECT r.reader_no, r.name, bc.copy_code, b.title, "
@@ -81,12 +105,26 @@ StatisticsService::loanHistory(int limit, QString *error) const
             query.value(6).toDateTime();
         result.append(loan);
     }
+    if (error) {
+        error->clear();
+    }
     return result;
 }
 
-bool StatisticsService::exportCsv(const QString &fileName, QString *error) const
+bool StatisticsService::exportCsv(
+    const UserSession &session,
+    const QString &fileName,
+    QString *error) const
 {
+    if (!PermissionService::requirePermission(
+            session,
+            Permission::ManageCirculation,
+            error)) {
+        return false;
+    }
+
     QFile file(fileName);
+
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         if (error) {
             *error = QStringLiteral("无法写入文件：%1").arg(file.errorString());
@@ -122,5 +160,8 @@ bool StatisticsService::exportCsv(const QString &fileName, QString *error) const
                << csvCell(query.value(6).toString()) << '\n';
     }
     file.close();
+    if (error) {
+        error->clear();
+    }
     return true;
 }

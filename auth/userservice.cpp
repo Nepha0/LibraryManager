@@ -751,3 +751,165 @@ bool UserService::assignRole(
 
     return true;
 }
+
+bool UserService::setUserStatus(
+    const UserSession &session,
+    qlonglong userId,
+    bool enabled,
+    QString *error)
+{
+    if (!PermissionService::requirePermission(
+            session,
+            Permission::ManageUsers,
+            error)) {
+        return false;
+    }
+
+    if (userId <= 0) {
+        if (error) {
+            *error = QStringLiteral("无效的用户ID");
+        }
+        return false;
+    }
+
+    if (userId == session.userId && !enabled) {
+        if (error) {
+            *error = QStringLiteral(
+                "不能停用当前登录账号");
+        }
+        return false;
+    }
+
+    QSqlDatabase database = Database::connection();
+    if (!database.transaction()) {
+        if (error) {
+            *error = QStringLiteral("修改用户状态失败");
+        }
+        return false;
+    }
+
+    QSqlQuery userQuery(database);
+    userQuery.prepare(QStringLiteral(
+        "SELECT "
+        "u.username, u.active, COALESCE(r.id, 0) "
+        "FROM users u "
+        "LEFT JOIN readers r ON r.user_id = u.id "
+        "WHERE u.id = ? "
+        "FOR UPDATE"));
+    userQuery.addBindValue(userId);
+
+    if (!userQuery.exec()) {
+        database.rollback();
+        if (error) {
+            *error = QStringLiteral("修改用户状态失败");
+        }
+        return false;
+    }
+
+    if (!userQuery.next()) {
+        database.rollback();
+        if (error) {
+            *error = QStringLiteral("用户不存在");
+        }
+        return false;
+    }
+
+    const QString username =
+        userQuery.value(0).toString();
+    const bool previousEnabled =
+        userQuery.value(1).toInt() == 1;
+    const qlonglong readerId =
+        userQuery.value(2).toLongLong();
+
+    if (previousEnabled == enabled) {
+        database.rollback();
+        if (error) {
+            error->clear();
+        }
+        return true;
+    }
+
+    if (!enabled && readerId > 0) {
+        QSqlQuery loanQuery(database);
+        loanQuery.prepare(QStringLiteral(
+            "SELECT COUNT(*) FROM loans "
+            "WHERE reader_id = ? "
+            "AND returned_at IS NULL"));
+        loanQuery.addBindValue(readerId);
+
+        if (!loanQuery.exec() || !loanQuery.next()) {
+            database.rollback();
+            if (error) {
+                *error = QStringLiteral(
+                    "检查关联读者借阅状态失败");
+            }
+            return false;
+        }
+
+        if (loanQuery.value(0).toInt() > 0) {
+            database.rollback();
+            if (error) {
+                *error = QStringLiteral(
+                    "关联读者有未归还图书，不能停用账号");
+            }
+            return false;
+        }
+    }
+
+    QSqlQuery updateQuery(database);
+    updateQuery.prepare(QStringLiteral(
+        "UPDATE users SET active = ? WHERE id = ?"));
+    updateQuery.addBindValue(enabled ? 1 : 0);
+    updateQuery.addBindValue(userId);
+
+    if (!updateQuery.exec()
+        || updateQuery.numRowsAffected() != 1) {
+        database.rollback();
+        if (error) {
+            *error = QStringLiteral("修改用户状态失败");
+        }
+        return false;
+    }
+
+    OperationLogService logService;
+    QString logError;
+    if (!logService.record(
+            session,
+            QStringLiteral("USER_STATUS_UPDATE"),
+            QStringLiteral("user"),
+            QString::number(userId),
+            QStringLiteral("账号 %1 状态：%2 -> %3")
+                .arg(username,
+                     previousEnabled
+                         ? QStringLiteral("启用")
+                         : QStringLiteral("停用"),
+                     enabled
+                         ? QStringLiteral("启用")
+                         : QStringLiteral("停用")),
+            &logError)) {
+        database.rollback();
+        if (error) {
+            *error = QStringLiteral(
+                "修改用户状态失败：无法记录操作日志");
+        }
+        return false;
+    }
+
+    if (!database.commit()) {
+        database.rollback();
+        if (error) {
+            *error = QStringLiteral("修改用户状态失败");
+        }
+        return false;
+    }
+
+    if (!enabled) {
+        PermissionService::invalidateUserSessions(
+            static_cast<int>(userId));
+    }
+
+    if (error) {
+        error->clear();
+    }
+    return true;
+}

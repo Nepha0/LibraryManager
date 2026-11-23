@@ -1,7 +1,9 @@
 #include "circulationservice.h"
 
 #include "../common/database.h"
+#include "../common/operationlogservice.h"
 #include "../common/paramservice.h"
+#include "../readers/readerservice.h"
 
 #include <QDateTime>
 #include <QSqlDatabase>
@@ -25,17 +27,19 @@ bool CirculationService::borrowBook(const UserSession &session,
     }
 
     ParamService params;
-    const auto maxLoans = params.getIntParam(QStringLiteral("borrow_limit"), error);
-    if (!maxLoans) {
+    const auto loanDays =
+        params.getIntParam(
+            QStringLiteral("borrow_period_days"),
+            error);
+
+    if (!loanDays.has_value()) {
         return false;
     }
-    const auto loanDays = params.getIntParam(QStringLiteral("borrow_period_days"), error);
-    if (!loanDays) {
-        return false;
-    }
-    if (*maxLoans < 1 || *loanDays < 1) {
+
+    if (*loanDays < 1) {
         if (error) {
-            *error = QStringLiteral("借阅上限和借阅期限必须为正整数");
+            *error = QStringLiteral(
+                "借阅期限必须为正整数");
         }
         return false;
     }
@@ -50,39 +54,40 @@ bool CirculationService::borrowBook(const UserSession &session,
 
     QSqlQuery query(database);
     query.prepare(QStringLiteral(
-        "SELECT id, active FROM readers WHERE reader_no = ? FOR UPDATE"));
+        "SELECT id FROM readers "
+        "WHERE reader_no = ? FOR UPDATE"));
     query.addBindValue(readerNo.trimmed());
+
     if (!query.exec() || !query.next()) {
         if (error) {
-            *error = query.lastError().isValid() ? query.lastError().text()
-                                                : QStringLiteral("未找到该读者编号");
+            *error = query.lastError().isValid()
+            ? query.lastError().text()
+            : QStringLiteral(
+                  "未找到该读者编号");
         }
         database.rollback();
         return false;
     }
-    const auto readerId = query.value(0).toLongLong();
-    const bool readerActive = query.value(1).toInt() == 1;
-    if (!readerActive) {
+
+    const int readerId =
+        query.value(0).toInt();
+
+    ReaderService readerService;
+    const ReaderEligibilityResult eligibility =
+        readerService.checkReaderEligibility(
+            session,
+            readerId,
+            error);
+
+    if (!eligibility.eligible) {
         database.rollback();
-        if (error) {
-            *error = QStringLiteral("该读者已停用，不能借书");
-        }
-        return false;
-    }
-    query.prepare(QStringLiteral(
-        "SELECT COUNT(*) FROM loans WHERE reader_id = ? AND returned_at IS NULL"));
-    query.addBindValue(readerId);
-    if (!query.exec() || !query.next()) {
-        if (error) {
-            *error = query.lastError().text();
-        }
-        database.rollback();
-        return false;
-    }
-    if (query.value(0).toInt() >= *maxLoans) {
-        database.rollback();
-        if (error) {
-            *error = QStringLiteral("已达到该读者的借阅上限");
+
+        if (error && error->isEmpty()) {
+            *error = eligibility.reasons.isEmpty()
+            ? QStringLiteral(
+                  "该读者当前不能借书")
+            : eligibility.reasons.join(
+                  QStringLiteral("；"));
         }
         return false;
     }
@@ -119,6 +124,28 @@ bool CirculationService::borrowBook(const UserSession &session,
         return false;
     }
 
+    qlonglong loanId =
+        query.lastInsertId().toLongLong();
+
+    if (loanId <= 0) {
+        QSqlQuery idQuery(database);
+        if (idQuery.exec(QStringLiteral(
+                "SELECT LAST_INSERT_ID()"))
+            && idQuery.next()) {
+            loanId =
+                idQuery.value(0).toLongLong();
+        }
+    }
+
+    if (loanId <= 0) {
+        database.rollback();
+        if (error) {
+            *error = QStringLiteral(
+                "无法读取新增借阅记录编号");
+        }
+        return false;
+    }
+
     query.prepare(QStringLiteral(
         "UPDATE book_copies SET status = 'borrowed' "
         "WHERE id = ? AND status = 'available'"));
@@ -131,12 +158,38 @@ bool CirculationService::borrowBook(const UserSession &session,
         return false;
     }
 
+    OperationLogService logService;
+    QString logError;
+
+    if (!logService.record(
+            session,
+            QStringLiteral("LOAN_BORROW"),
+            QStringLiteral("loan"),
+            QString::number(loanId),
+            QStringLiteral(
+                "读者 %1 借阅实体册 %2，借阅期限 %3 天")
+                .arg(readerNo.trimmed(),
+                     QString::number(copyId),
+                     QString::number(*loanDays)),
+            &logError)) {
+        database.rollback();
+
+        if (error) {
+            *error = QStringLiteral(
+                "借阅失败：无法记录操作日志");
+        }
+        return false;
+    }
+
     if (!database.commit()) {
         if (error) {
             *error = database.lastError().text();
         }
         database.rollback();
         return false;
+    }
+    if (error) {
+        error->clear();
     }
     return true;
 }
@@ -200,6 +253,28 @@ bool CirculationService::returnBook(const UserSession &session,
         return false;
     }
 
+    OperationLogService logService;
+    QString logError;
+
+    if (!logService.record(
+            session,
+            QStringLiteral("LOAN_RETURN"),
+            QStringLiteral("loan"),
+            QString::number(loanId),
+            QStringLiteral(
+                "归还借阅记录 %1，对应实体册 %2")
+                .arg(QString::number(loanId),
+                     QString::number(copyId)),
+            &logError)) {
+        database.rollback();
+
+        if (error) {
+            *error = QStringLiteral(
+                "归还失败：无法记录操作日志");
+        }
+        return false;
+    }
+
     if (!database.commit()) {
         if (error) {
             *error = database.lastError().text();
@@ -207,12 +282,24 @@ bool CirculationService::returnBook(const UserSession &session,
         database.rollback();
         return false;
     }
+    if (error) {
+        error->clear();
+    }
     return true;
 }
 
-QVector<ActiveLoanInfo> CirculationService::activeLoans(QString *error) const
+QVector<ActiveLoanInfo> CirculationService::activeLoans(
+    const UserSession &session,
+    QString *error) const
 {
     QVector<ActiveLoanInfo> result;
+
+    if (!PermissionService::requirePermission(
+            session,
+            Permission::ManageCirculation,
+            error)) {
+        return result;
+    }
     QSqlQuery query(Database::connection());
     if (!query.exec(QStringLiteral(
             "SELECT l.id, r.reader_no, r.name, bc.copy_code, b.title, "
@@ -225,6 +312,9 @@ QVector<ActiveLoanInfo> CirculationService::activeLoans(QString *error) const
             "ORDER BY l.due_at, l.id"))) {
         if (error) {
             *error = query.lastError().text();
+        }
+        if (error) {
+            error->clear();
         }
         return result;
     }
