@@ -6,7 +6,7 @@
  * V1.1 适配（统一 MySQL DDL）：
  *  - 双驱动：openSqlite() 用于单元测试与本地演示（:memory: 或文件）；
  *            openMySql() 用 QODBC + DSN 连接 B 建好的 MySQL 库。
- *  - MySQL 模式不执行内嵌建表——表结构由 docs/统一MySQL-DDL-V1.1-干净版.sql
+ *  - MySQL 模式不执行内嵌建表——表结构由 docs/统一MySQL-DDL.md
  *    （空库）或 003_unified_schema_v1.sql（旧库）统一创建，避免两套 DDL 分裂。
  *  - SQLite 内嵌 schema 的物理表名/列名/枚举值已对齐 V1.1，保证测试与生产同构。
  *  - nowExpr(db)：SQL 片段级方言隔离（SQLite=datetime('now','localtime')，MySQL=NOW()）。
@@ -48,7 +48,7 @@ public:
 
     QString lastError() const { return m_lastError; }
 
-    // 9 张业务表 DDL（SQLite 版，结构与 V1.1 对齐；docs/schema.sql 与此同步）
+    // 9 张业务表 DDL（SQLite 版，结构与 V1.1 对齐；docs/统一MySQL-DDL.md 为此基线）
     static const char* schemaSql();
 
 private:
