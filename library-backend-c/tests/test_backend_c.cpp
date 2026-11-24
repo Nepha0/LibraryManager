@@ -146,9 +146,6 @@ void runDbTests()
     expect(rn1.data.value(QStringLiteral("new_due_at")).toString() == today.addDays(45).toString(iso),
            "新应还日期 = 原应还 + 15 天");
     expect(rn1.data.value(QStringLiteral("renew_count")).toInt() == 1, "续借次数 = 1");
-                qPrintable(scalar(db, QStringLiteral("SELECT renew_count FROM loans WHERE id=%1").arg(loan1)).toString()),
-                qPrintable(scalar(db, QStringLiteral("SELECT due_at FROM loans WHERE id=%1").arg(loan1)).toString()),
-                qPrintable(scalar(db, QStringLiteral("SELECT param_value FROM system_params WHERE param_key='max_renew_times'")).toString()));
 
     // 5) 续借超次数（max_renew_times=1）
     lib::Result rn2 = renew.renew(staff, loan1);
