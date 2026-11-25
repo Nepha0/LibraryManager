@@ -6,7 +6,7 @@
  *  - 列表（含图书引用计数）+ 新增 / 编辑 / 删除
  *  - 删除被图书引用的分类时返回限制提示（CategoryInUse）
  */
-#include "../common/contract.h"
+#include "common/contract.h"
 #include <QSqlDatabase>
 
 namespace lib {

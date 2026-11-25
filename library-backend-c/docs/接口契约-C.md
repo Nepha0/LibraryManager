@@ -1,11 +1,11 @@
 # 后端C 接口契约（阶段0 产出物）
 
-> 供前端（F）、后端 A/B 对接使用。所有 Service 方法统一返回 `lib::Result`（与 A 的 `contract.h` 同构）。
+> 供前端（F）、后端 A/B 对接使用。所有 Service 方法统一返回 `lib::Result`（复用[共享契约头文件](../../common/contract.h)）。
 > 契约变更须当天通知全员并更新本文档（工作清单第 10 节变更原则）。
 
 ## 文档状态：V1.0 正式契约（已随 PR #7 合入 main）
 
-本文档由 C 依据工作清单板块四 4.2 完成标准、飞书工作清单第六节「接口统一」基线（表格 jTpgV6 / RuFk9R）以及 A 端定稿契约 `library-backend-a/docs/接口契约.md`（V1.1，PR #8 评审通过）整理，C 模块已按此实装并通过 62 项断言验证。后续变更按契约变更原则当天通知全员并同步更新本文档。
+本文档由 C 依据工作清单板块四 4.2 完成标准、飞书工作清单第六节「接口统一」基线（表格 jTpgV6 / RuFk9R）以及 [统一接口契约](../../docs/接口契约.md)（V1.1，PR #8 评审通过）整理，C 模块已按此实装并通过 62 项断言验证。后续变更按契约变更原则当天通知全员并同步更新本文档。
 
 ## 0. 依赖基线（与 A 端完全一致，不再复述）
 
@@ -198,10 +198,10 @@ Result recommend(const OperatorContext& op, qint64 readerId);
 
 ## 10. 与 A / B 的对接点与待对齐事项
 
-- **对 A**：C 全部副本状态变更走 `changeCopyStatus`（§0）；`getCopyByBarcode` / `copyStatistics` 用于借阅与预约校验；A 端错误码 1007/1011/1013 原样透出给 F。A 端定稿契约第 3 节已登记 C 为"已由 PR #7 实现"，联调顺序以其为准。
+- **对 A**：C 全部副本状态变更走 `changeCopyStatus`（§0）；`getCopyByBarcode` / `copyStatistics` 用于借阅与预约校验；A 端错误码 1007/1011/1013 原样透出给 F。统一接口契约第 3 节已登记 C 为"已由 PR #7 实现"，联调顺序以其为准。
 - **对 B**：借阅与预约第一步调用 `checkReaderEligibility(读者ID)`，只消费"账号/读者状态"类原因（借阅上限仅借阅场景生效）。⚠️ B 当前实现为 `UserSession + bool + QString*error` 风格，与统一基线的 `OperatorContext + Result` 不同构——**需 B 确认迁移时间表，或由 C 侧薄适配层过渡，联调前拍板**。
 - **对 A（集成）**：根目录 `circulation/circulationservice.cpp` 为演示版遗留（直接 UPDATE book_copies、无续借/预约/逾期），C 按 4.2 完成标准重写后，旧文件与 `LibraryManager.pro` 的取舍由 A 统一集成处理。
-- **表结构**：统一表结构定稿为 **V1.1**——空库初始化以 `library-backend-a/docs/统一MySQL-DDL.md` 为唯一事实来源，`database/migrations/mysql/003_unified_schema_v1.sql` 降级为旧库升级迁移脚本（`docs/schema.sql` 已删除）。关键口径：`loans` 经 `active_copy_id` 生成列唯一索引保证一副本仅一条在借、`reservations` 经 `active_rid` 生成列唯一索引保证同读者同书一条有效预约（SQLite 测试库以部分唯一索引等价实现）；**`max_renew_times` 官方默认值定为 2**（B 原默认 1→2；C 测试自行种参数值，不受影响）；逾期判断统一口径 `returned_at IS NULL AND due_at < CURRENT_DATE`。C 已评审无异议。
+- **表结构**：统一表结构定稿为 **V1.1**——空库初始化以 [统一 MySQL DDL](../../docs/统一MySQL-DDL.md) 为唯一事实来源，`database/migrations/mysql/003_unified_schema_v1.sql` 降级为旧库升级迁移脚本（`docs/schema.sql` 已删除）。关键口径：`loans` 经 `active_copy_id` 生成列唯一索引保证一副本仅一条在借、`reservations` 经 `active_rid` 生成列唯一索引保证同读者同书一条有效预约（SQLite 测试库以部分唯一索引等价实现）；**`max_renew_times` 官方默认值定为 2**（B 原默认 1→2；C 测试自行种参数值，不受影响）；逾期判断统一口径 `returned_at IS NULL AND due_at < CURRENT_DATE`。C 已评审无异议。
 
 ## 11. 测试承诺（对应工作清单 4.2）
 

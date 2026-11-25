@@ -29,6 +29,7 @@ HEADERS += app/mainwindow.h \
            app/windowwidgets.h \
            tests/service_smoke_test.h \
            app/backendintegration.h \
+           common/contract.h \
            common/database.h \
            books/bookservice.h \
            circulation/circulationservice.h \

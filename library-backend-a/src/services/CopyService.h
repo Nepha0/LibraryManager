@@ -14,7 +14,7 @@
  *   预约保留待取 RESERVED → 借出（预约者取书）/ 在馆可借（超时释放或取消）
  *   维修中 MAINTENANCE / 遗失报损 LOST → 仅管理员可恢复(→AVAILABLE)或终结(→LOST)
  */
-#include "../common/contract.h"
+#include "common/contract.h"
 #include <QSqlDatabase>
 
 namespace lib {

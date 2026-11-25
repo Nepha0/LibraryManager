@@ -1,5 +1,5 @@
 # 后端C 核心库（静态库 backendc）
-# 复用 A 端 contract.h / DatabaseManager / CopyService（源码直编，免跨库链接顺序问题）
+# 复用共享 contract.h 和 A 端 DatabaseManager / CopyService（源码直编，免跨库链接顺序问题）
 QT += core sql
 CONFIG += c++17
 TEMPLATE = lib
@@ -7,12 +7,12 @@ CONFIG += staticlib
 TARGET = backendc
 DESTDIR = $$PWD   # 静态库固定输出到 src/libbackendc.a，供 tests 链接
 
-INCLUDEPATH += $$PWD $$PWD/../../library-backend-a/src
+INCLUDEPATH += $$PWD $$PWD/../.. $$PWD/../../library-backend-a/src
 DEFINES += QT_DEPRECATED_WARNINGS
 
 HEADERS += \
     contract_c.h \
-    ../../library-backend-a/src/common/contract.h \
+    ../../common/contract.h \
     ../../library-backend-a/src/database/DatabaseManager.h \
     ../../library-backend-a/src/services/CopyService.h \
     services/BorrowService.h \

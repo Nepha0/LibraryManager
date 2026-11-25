@@ -1,5 +1,5 @@
 -- 003_unified_schema_v1.sql
--- 统一 MySQL 基线 V1.1 · 旧库增量迁移（对应《统一MySQL-DDL-拍板版.md》V1.1）
+-- 统一 MySQL 基线 V1.1 · 旧库增量迁移（对应根目录 docs/统一MySQL-DDL.mdV1.1）
 --
 -- 用法：加入 scripts/init-mysql.ps1 的迁移列表，放在 001_backend_b.sql / 002_demo_catalog.sql 之后。
 -- 特性：逐语句幂等（每条 ALTER 前查 information_schema 再 PREPARE 执行），可重复执行；

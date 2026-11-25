@@ -7,11 +7,11 @@ CONFIG += staticlib
 TARGET = backenda
 DESTDIR = $$PWD   # 静态库固定输出到 src/libbackenda.a，供 demo/tests 链接
 
-INCLUDEPATH += $$PWD $$PWD/../third_party/QXlsx
+INCLUDEPATH += $$PWD $$PWD/../.. $$PWD/../third_party/QXlsx
 DEFINES += QT_DEPRECATED_WARNINGS
 
 HEADERS += \
-    common/contract.h \
+    ../../common/contract.h \
     database/DatabaseManager.h \
     services/search_core.h \
     services/BookService.h \

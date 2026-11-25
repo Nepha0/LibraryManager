@@ -5,7 +5,7 @@ CONFIG -= app_bundle
 TEMPLATE = app
 TARGET = backend_c_tests
 
-INCLUDEPATH += $$PWD/../src $$PWD/../../library-backend-a/src
+INCLUDEPATH += $$PWD/../src $$PWD/../.. $$PWD/../../library-backend-a/src
 LIBS += $$PWD/../src/libbackendc.a
 PRE_TARGETDEPS += $$PWD/../src/libbackendc.a
 

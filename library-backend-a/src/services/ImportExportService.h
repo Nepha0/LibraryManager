@@ -12,7 +12,7 @@
  * 副本导入列（必需列：条码、ISBN）：
  *   条码, ISBN, 馆藏位置, 入藏日期
  */
-#include "../common/contract.h"
+#include "common/contract.h"
 #include <QSqlDatabase>
 #include <QVector>
 #include <QStringList>
