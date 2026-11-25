@@ -10,6 +10,122 @@
 #include <QVariant>
 #include <QVariantList>
 
+namespace {
+
+lib::Result logFailure(const QString &error)
+{
+    if (error == QStringLiteral("请先登录")
+        || error == QStringLiteral("登录状态已失效，请重新登录")) {
+        return lib::Result::fail(lib::ErrorCode::NotAuthenticated, error);
+    }
+    if (error == QStringLiteral("无权限")) {
+        return lib::failB(lib::ErrorCodeB::LogQueryDenied, error);
+    }
+    if (error == QStringLiteral("开始时间不能晚于结束时间")) {
+        return lib::Result::fail(lib::ErrorCode::InvalidCondition, error);
+    }
+    return lib::Result::fail(
+        lib::ErrorCode::DbError,
+        error.isEmpty() ? QStringLiteral("操作日志操作失败") : error);
+}
+
+QVariantMap logToMap(const OperationLogInfo &item)
+{
+    QVariantMap value;
+    value.insert(QStringLiteral("log_id"), item.id);
+    value.insert(QStringLiteral("operator_user_id"), item.operatorUserId);
+    value.insert(QStringLiteral("operator_name"), item.operatorName);
+    value.insert(QStringLiteral("action_type"), item.actionType);
+    value.insert(QStringLiteral("target_type"), item.targetType);
+    value.insert(QStringLiteral("target_id"), item.targetId);
+    value.insert(QStringLiteral("detail"), item.detail);
+    value.insert(QStringLiteral("created_at"), item.createdAt);
+    return value;
+}
+
+QDateTime dateTimeFilter(const QVariant &value)
+{
+    if (value.canConvert<QDateTime>()) {
+        const QDateTime dateTime = value.toDateTime();
+        if (dateTime.isValid()) {
+            return dateTime;
+        }
+    }
+    return QDateTime::fromString(value.toString(), Qt::ISODate);
+}
+
+}
+
+lib::Result OperationLogService::record(
+    const lib::OperatorContext &context,
+    const QString &actionType,
+    const QString &targetType,
+    const QString &targetId,
+    const QString &detail)
+{
+    const lib::Result sessionCheck = PermissionService::requirePermission(
+        context, Permission::ViewBooks);
+    if (!sessionCheck.ok()) {
+        return sessionCheck;
+    }
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    if (!record(session, actionType, targetType, targetId, detail, &error)) {
+        return logFailure(error);
+    }
+    QVariantMap data;
+    data.insert(QStringLiteral("action_type"), actionType.trimmed());
+    data.insert(QStringLiteral("target_type"), targetType.trimmed());
+    data.insert(QStringLiteral("target_id"), targetId.trimmed());
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("操作日志已记录"),
+                       data,
+                       {},
+                       1};
+}
+
+lib::Result OperationLogService::listLogs(
+    const lib::OperatorContext &context,
+    const QVariantMap &filter,
+    int page,
+    int pageSize) const
+{
+    if (!lib::pageParamsValid(page, pageSize)) {
+        return lib::Result::fail(lib::ErrorCode::InvalidPage,
+                                 QStringLiteral("分页参数非法"));
+    }
+
+    OperationLogQuery query;
+    query.actionType = filter.value(QStringLiteral("action_type"),
+                                    filter.value(QStringLiteral("actionType")))
+                           .toString();
+    if (filter.contains(QStringLiteral("from"))) {
+        query.from = dateTimeFilter(filter.value(QStringLiteral("from")));
+    }
+    if (filter.contains(QStringLiteral("to"))) {
+        query.to = dateTimeFilter(filter.value(QStringLiteral("to")));
+    }
+    query.page = page;
+    query.pageSize = pageSize;
+
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    const OperationLogPage result = listLogs(session, query, &error);
+    if (!error.isEmpty()) {
+        return logFailure(error);
+    }
+
+    QVariantList list;
+    for (const OperationLogInfo &item : result.items) {
+        list.append(logToMap(item));
+    }
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("查询操作日志成功"),
+                       {},
+                       list,
+                       result.total};
+}
+
 bool OperationLogService::record(
     const UserSession &session,
     const QString &actionType,

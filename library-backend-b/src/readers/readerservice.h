@@ -7,6 +7,8 @@
 #include <QVector>
 #include <optional>
 
+class CirculationService;
+
 struct ReaderInfo
 {
     int id = 0;
@@ -33,6 +35,7 @@ struct ReaderQuery
     QString readerNo;
     QString name;
     std::optional<bool> enabled;
+    bool exactReaderNo = false;
 };
 
 struct ReaderDetail
@@ -46,6 +49,37 @@ struct ReaderDetail
 class ReaderService
 {
 public:
+    // 统一契约入口。fields 支持 reader_no、name、phone。
+    lib::Result addReader(const lib::OperatorContext &context,
+                          const QVariantMap &fields);
+
+    lib::Result updateReader(const lib::OperatorContext &context,
+                             qint64 readerId,
+                             const QVariantMap &fields);
+
+    lib::Result setReaderStatus(const lib::OperatorContext &context,
+                                qint64 readerId,
+                                bool enabled);
+
+    lib::Result checkReaderEligibility(
+        const lib::OperatorContext &context,
+        qint64 readerId) const;
+
+    // C 的 EligibilityFn 适配入口：只返回读者资格，不暴露 B 的会话类型。
+    lib::Result checkReaderEligibility(qint64 readerId) const;
+
+    lib::Result getReader(const lib::OperatorContext &context,
+                          qint64 readerId) const;
+
+    // reader_no uses substring matching unless exact_reader_no is true.
+    lib::Result listReaders(const lib::OperatorContext &context,
+                            const QVariantMap &filter,
+                            int page = 1,
+                            int pageSize = 20) const;
+
+private:
+    friend class CirculationService;
+
     bool addReader(const UserSession &session,
                    const QString &readerNo,
                    const QString &name,

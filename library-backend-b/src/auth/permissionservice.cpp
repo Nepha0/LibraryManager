@@ -67,6 +67,14 @@ bool PermissionService::hasPermission(
     return session.permissions.contains(permission);
 }
 
+bool PermissionService::hasPermission(
+    const lib::OperatorContext &context,
+    Permission permission)
+{
+    const UserSession session = UserSession::fromOperatorContext(context);
+    return hasPermission(session, permission);
+}
+
 bool PermissionService::requirePermission(
     const UserSession &session,
     Permission permission,
@@ -132,6 +140,30 @@ bool PermissionService::requirePermission(
     }
 
     return true;
+}
+
+lib::Result PermissionService::requirePermission(
+    const lib::OperatorContext &context,
+    Permission permission)
+{
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    if (requirePermission(session, permission, &error)) {
+        return lib::Result::success();
+    }
+
+    if (error == QStringLiteral("请先登录")
+        || error == QStringLiteral("登录状态已失效，请重新登录")) {
+        return lib::Result::fail(
+            lib::ErrorCode::NotAuthenticated,
+            error);
+    }
+    if (error == QStringLiteral("无权限")) {
+        return lib::Result::fail(
+            lib::ErrorCode::NoPermission,
+            error);
+    }
+    return lib::Result::fail(lib::ErrorCode::DbError, error);
 }
 
 quint64 PermissionService::currentSessionGeneration(

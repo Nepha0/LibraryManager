@@ -165,19 +165,25 @@ lib::OperatorContext MainWindow::operatorContext() const
 
 int MainWindow::findReaderId(const QString &readerNo, QString *error) const
 {
-    ReaderQuery query;
-    query.readerNo = readerNo.trimmed();
-    if (query.readerNo.isEmpty()) {
+    const QString normalizedReaderNo = readerNo.trimmed();
+    if (normalizedReaderNo.isEmpty()) {
         *error = QStringLiteral("请填写读者编号");
         return 0;
     }
-    const auto readers = m_readerService.readers(m_session, query, error);
-    if (!error->isEmpty()) {
+    QVariantMap filter;
+    filter.insert(QStringLiteral("reader_no"), normalizedReaderNo);
+    filter.insert(QStringLiteral("exact_reader_no"), true);
+    const lib::Result result = m_readerService.listReaders(
+        operatorContext(), filter, 1, 1);
+    if (!result.ok()) {
+        *error = result.message;
         return 0;
     }
-    for (const auto &reader : readers) {
-        if (reader.readerNo.compare(query.readerNo, Qt::CaseInsensitive) == 0) {
-            return reader.id;
+    for (const QVariant &value : result.list) {
+        const QVariantMap reader = value.toMap();
+        if (reader.value(QStringLiteral("reader_no")).toString()
+                .compare(normalizedReaderNo, Qt::CaseInsensitive) == 0) {
+            return reader.value(QStringLiteral("reader_id")).toInt();
         }
     }
     *error = QStringLiteral("未找到该读者编号");

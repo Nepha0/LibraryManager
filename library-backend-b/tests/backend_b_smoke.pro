@@ -19,4 +19,5 @@ SOURCES += $$PWD/main.cpp \
 HEADERS += $$PWD/../../common/database.h \
            $$PWD/../../circulation/circulationservice.h \
            $$PWD/../../statistics/statisticsservice.h \
-           $$PWD/../../books/bookservice.h
+           $$PWD/../../books/bookservice.h \
+           $$PWD/legacy_api_adapter.h

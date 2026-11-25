@@ -276,6 +276,24 @@ Qt 通过 `QODBC` 和 64 位用户或系统 DSN 连接 MySQL。DSN 指向 `libra
 - 停用账号会使已经签发的旧会话立即并永久失效
 - 账号重新启用后必须重新登录，旧会话不会恢复
 
+### 4.8 统一契约适配入口
+
+共享契约位于仓库根目录 `common/contract.h`。B 已补充以下统一入口：
+
+- `AuthService`：`login(username, password)` 返回 `lib::Result`，登录上下文放在 `data`；
+  `userName` 固定表示登录账号 `users.username`，显示名称单独放在 `display_name`。
+- `UserService`：账号增删改、密码重置、角色/状态变更、详情和分页查询均提供
+  `lib::OperatorContext + lib::Result` 入口。
+- `ReaderService`：读者增改、启停、详情、分页查询和借阅资格检查均提供统一入口；资格
+  结果保留 `eligible`、`reader_enabled`、`account_enabled`、`active_loans`、`borrow_limit`
+  和 `reasons` 字段，供 C 的资格适配端口使用。
+- `ParamService`、`OperationLogService`：读取/修改参数和记录/分页查询日志均提供统一入口。
+
+B 错误码登记在 `common/contract.h` 的 `ErrorCodeB`（2000～2999）中。旧的
+`UserSession + bool/optional/QVector` 签名已从 Service 的公开接口移除；业务代码只能通过
+统一入口接入。历史冒烟断言如需复用旧数据形状，使用测试目录下的
+`legacy_api_adapter.h`，不会把旧接口暴露给 A/C/F。
+
 ## 5. 后端 B 冒烟测试
 
 测试项目：
@@ -328,6 +346,9 @@ Qt Creator 运行方法：
 - 实际借书入口拒绝停用读者、停用账号和达到上限的读者
 - 停用账号后已有会话立即失效
 - 账号重新启用后旧会话仍然失效，新会话正常
+- 统一契约登录返回 `OperatorContext` 数据
+- 统一 `Result` 的参数、用户、读者和日志分页查询
+- 统一入口拒绝非法分页参数并返回 `1016 InvalidPage`
 - 图书、当前借阅、统计概览和借阅历史的角色权限
 - `borrow_period_days` 修改后实际应还日期同步变化
 - 图书新增、借阅和归还自动写入操作日志

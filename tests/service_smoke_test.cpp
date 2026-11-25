@@ -23,39 +23,77 @@ bool runServiceSmokeTest()
         return false;
     }
 
-    const auto session = AuthService::login(
-        QStringLiteral("admin"), QStringLiteral("admin123"), &error);
-    if (!session.has_value()) {
-        qCritical().noquote() << error;
+    const lib::Result login = AuthService::login(
+        QStringLiteral("admin"), QStringLiteral("admin123"));
+    if (!login.ok()) {
+        qCritical().noquote() << login.message;
         return false;
     }
+
+    const QString roleName = login.data.value(QStringLiteral("role")).toString();
+    const lib::Role role = roleName == QStringLiteral("admin")
+        ? lib::Role::Admin
+        : (roleName == QStringLiteral("librarian")
+               ? lib::Role::Librarian
+               : lib::Role::Reader);
+    const lib::OperatorContext op{
+        login.data.value(QStringLiteral("user_id")).toLongLong(),
+        login.data.value(QStringLiteral("user_name")).toString(),
+        role,
+        login.data.value(QStringLiteral("authenticated")).toBool(),
+        login.data.value(QStringLiteral("session_generation")).toLongLong()};
+    UserSession session = UserSession::fromOperatorContext(op);
+    session.displayName = login.data.value(QStringLiteral("display_name"))
+                              .toString();
 
     const QString suffix = QString::number(QDateTime::currentMSecsSinceEpoch());
     const QString readerNo = QStringLiteral("SMOKE-%1").arg(suffix);
     const QString readerName = QStringLiteral("冒烟测试读者");
     ReaderService readers;
-    if (!readers.addReader(*session, readerNo, readerName, QString(), &error)) {
-        qCritical().noquote() << error;
+    QVariantMap readerFields{
+        {QStringLiteral("reader_no"), readerNo},
+        {QStringLiteral("name"), readerName},
+        {QStringLiteral("phone"), QString()}};
+    if (!readers.addReader(op, readerFields).ok()) {
+        qCritical().noquote() << "Could not create smoke reader.";
         return false;
     }
     const QString nextReaderNo = readerNo + QStringLiteral("-NEXT");
-    if (!readers.addReader(*session, nextReaderNo, readerName, QString(), &error)) {
-        qCritical().noquote() << error;
+    readerFields.insert(QStringLiteral("reader_no"), nextReaderNo);
+    if (!readers.addReader(op, readerFields).ok()) {
+        qCritical().noquote() << "Could not create second smoke reader.";
         return false;
     }
     int readerId = 0;
     int nextReaderId = 0;
-    for (const auto &reader : readers.readers(*session, {readerNo, {}, {}}, &error)) {
-        if (reader.readerNo == readerNo) readerId = reader.id;
-        if (reader.readerNo == nextReaderNo) nextReaderId = reader.id;
+    QVariantMap readerFilter;
+    readerFilter.insert(QStringLiteral("reader_no"), readerNo);
+    const lib::Result readerPage = readers.listReaders(
+        op, readerFilter, 1, 20);
+    for (const QVariant &value : readerPage.list) {
+        const QVariantMap reader = value.toMap();
+        if (reader.value(QStringLiteral("reader_no")).toString() == readerNo) {
+            readerId = reader.value(QStringLiteral("reader_id")).toInt();
+        }
     }
-    if (readerId == 0 || nextReaderId == 0) {
-        qCritical().noquote() << "Smoke test could not find its readers." << error;
+    readerFilter.insert(QStringLiteral("reader_no"), nextReaderNo);
+    const lib::Result nextReaderPage = readers.listReaders(
+        op, readerFilter, 1, 20);
+    for (const QVariant &value : nextReaderPage.list) {
+        const QVariantMap reader = value.toMap();
+        if (reader.value(QStringLiteral("reader_no")).toString() == nextReaderNo) {
+            nextReaderId = reader.value(QStringLiteral("reader_id")).toInt();
+        }
+    }
+    if (!readerPage.ok() || !nextReaderPage.ok()
+        || readerId == 0 || nextReaderId == 0) {
+        qCritical().noquote() << "Smoke test could not find its readers."
+                              << readerPage.message << nextReaderPage.message;
         return false;
     }
 
     StatisticsService statistics;
-    const DashboardStats before = statistics.dashboard(*session, &error);
+    const DashboardStats before = statistics.dashboard(session, &error);
     if (!error.isEmpty()) {
         qCritical().noquote() << error;
         return false;
@@ -65,14 +103,13 @@ bool runServiceSmokeTest()
     const QString isbn =
         QStringLiteral("SMOKE-%1").arg(suffix);
     const QString title = QStringLiteral("冒烟测试图书");
-    if (!books.addBook(*session, title,
+    if (!books.addBook(session, title,
                        QStringLiteral("测试作者"), isbn,
                        QStringLiteral("计算机"), 1, &error)) {
         qCritical().noquote() << error;
         return false;
     }
 
-    const auto op = BackendIntegration::operatorContext(*session);
     const auto db = Database::connection();
     lib::BookService catalog(db);
     const auto found = catalog.listBooks(op, {{QStringLiteral("keyword"), suffix.right(10)}});
@@ -88,16 +125,16 @@ bool runServiceSmokeTest()
         return false;
     }
     const QString barcode = bookCopies.list.front().toMap().value(QStringLiteral("barcode")).toString();
-    const auto eligibility = BackendIntegration::readerEligibility(*session);
+    const auto eligibility = BackendIntegration::readerEligibility(session);
     lib::BorrowService borrowing(db, &copies, eligibility);
-    const auto borrowAudit = BackendIntegration::loanAudit(*session, QStringLiteral("LOAN_BORROW"), barcode);
+    const auto borrowAudit = BackendIntegration::loanAudit(session, QStringLiteral("LOAN_BORROW"), barcode);
     const auto loan = borrowing.borrow(op, readerId, barcode, borrowAudit);
     if (!loan.ok()) {
         qCritical().noquote() << "Borrow failed:" << loan.message;
         return false;
     }
     const qint64 loanId = loan.data.value(QStringLiteral("loan_id")).toLongLong();
-    const DashboardStats during = statistics.dashboard(*session, &error);
+    const DashboardStats during = statistics.dashboard(session, &error);
     if (!error.isEmpty() || during.activeLoans != before.activeLoans + 1
         || during.availableCopies != before.availableCopies) {
         qCritical().noquote() << "Borrow did not update statistics as expected." << error;
@@ -123,7 +160,7 @@ bool runServiceSmokeTest()
         return false;
     }
     lib::ReturnService returns(db, &copies);
-    const auto returnAudit = BackendIntegration::loanAudit(*session, QStringLiteral("LOAN_RETURN"), barcode);
+    const auto returnAudit = BackendIntegration::loanAudit(session, QStringLiteral("LOAN_RETURN"), barcode);
     const auto returned = returns.returnBook(op, {{QStringLiteral("loan_id"), loanId}}, returnAudit);
     if (!returned.ok()) {
         qCritical().noquote() << "Return failed:" << returned.message;
@@ -141,13 +178,13 @@ bool runServiceSmokeTest()
         return false;
     }
 
-    const auto history = statistics.loanHistory(*session, 1, &error);
+    const auto history = statistics.loanHistory(session, 1, &error);
     if (history.isEmpty() || history.front().readerNo != readerNo
         || !history.front().returnedAt.isValid()) {
         qCritical().noquote() << "Returned loan is missing from history." << error;
         return false;
     }
-    const DashboardStats stats = statistics.dashboard(*session, &error);
+    const DashboardStats stats = statistics.dashboard(session, &error);
     if (!error.isEmpty() || stats.titles != before.titles + 1
         || stats.availableCopies != before.availableCopies + 1
         || stats.activeLoans != before.activeLoans) {

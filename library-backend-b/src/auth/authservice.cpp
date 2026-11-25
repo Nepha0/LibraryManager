@@ -8,6 +8,46 @@
 #include <QSqlQuery>
 #include <QVariant>
 
+lib::Result AuthService::login(const QString &username,
+                               const QString &password)
+{
+    QString error;
+    const auto session = login(username, password, &error);
+    if (!session.has_value()) {
+        if (error == QStringLiteral("系统异常，请稍后重试")) {
+            return lib::Result::fail(lib::ErrorCode::DbError, error);
+        }
+        const lib::ErrorCodeB code =
+            error == QStringLiteral("账号已停用，请联系管理员")
+                ? lib::ErrorCodeB::AccountDisabled
+                : lib::ErrorCodeB::InvalidCredentials;
+        return lib::failB(code, error);
+    }
+
+    const UserSession &value = *session;
+    if (value.role != QStringLiteral("admin")
+        && value.role != QStringLiteral("librarian")
+        && value.role != QStringLiteral("reader")) {
+        return lib::failB(
+            lib::ErrorCodeB::UnsupportedRole,
+            QStringLiteral("不支持的角色"));
+    }
+    const lib::OperatorContext context = value.operatorContext();
+    QVariantMap data;
+    data.insert(QStringLiteral("user_id"), context.userId);
+    data.insert(QStringLiteral("user_name"), context.userName);
+    data.insert(QStringLiteral("display_name"), value.displayName);
+    data.insert(QStringLiteral("role"), value.role);
+    data.insert(QStringLiteral("authenticated"), context.authenticated);
+    data.insert(QStringLiteral("session_generation"),
+                context.session_generation);
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("登录成功"),
+                       data,
+                       {},
+                       1};
+}
+
 std::optional<UserSession> AuthService::login(const QString &username,
                                               const QString &password,
                                               QString *error)
@@ -88,7 +128,12 @@ std::optional<UserSession> AuthService::login(const QString &username,
     return session;
 }
 
-void AuthService::logout(UserSession &session)
+lib::Result AuthService::logout(lib::OperatorContext &context)
 {
-    session.clear();
+    context.userId = 0;
+    context.userName.clear();
+    context.role = lib::Role::Reader;
+    context.authenticated = false;
+    context.session_generation = 0;
+    return lib::Result::success(QStringLiteral("已退出登录"));
 }

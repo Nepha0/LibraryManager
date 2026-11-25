@@ -71,6 +71,222 @@ UserInfo userFromQuery(const QSqlQuery &query)
     return user;
 }
 
+lib::Result userFailure(const QString &error)
+{
+    if (error == QStringLiteral("请先登录")
+        || error == QStringLiteral("登录状态已失效，请重新登录")) {
+        return lib::Result::fail(lib::ErrorCode::NotAuthenticated, error);
+    }
+    if (error == QStringLiteral("无权限")) {
+        return lib::Result::fail(lib::ErrorCode::NoPermission, error);
+    }
+    if (error == QStringLiteral("账号已存在")) {
+        return lib::failB(lib::ErrorCodeB::UserDuplicate, error);
+    }
+    if (error == QStringLiteral("用户不存在")) {
+        return lib::failB(lib::ErrorCodeB::UserNotFound, error);
+    }
+    if (error == QStringLiteral("无效的用户ID")) {
+        return lib::failB(lib::ErrorCodeB::InvalidUserId, error);
+    }
+    if (error == QStringLiteral("不支持的角色")) {
+        return lib::failB(lib::ErrorCodeB::UnsupportedRole, error);
+    }
+    if (error == QStringLiteral("不能停用当前登录账号")) {
+        return lib::failB(lib::ErrorCodeB::SelfModificationDenied, error);
+    }
+    if (error == QStringLiteral("关联读者有未归还图书，不能停用账号")) {
+        return lib::failB(lib::ErrorCodeB::ReaderHasBorrowRecords, error);
+    }
+    return lib::Result::fail(
+        lib::ErrorCode::DbError,
+        error.isEmpty() ? QStringLiteral("用户操作失败") : error);
+}
+
+QVariantMap userToMap(const UserInfo &user)
+{
+    QVariantMap value;
+    value.insert(QStringLiteral("user_id"), user.id);
+    value.insert(QStringLiteral("username"), user.username);
+    value.insert(QStringLiteral("user_name"), user.username);
+    value.insert(QStringLiteral("display_name"), user.displayName);
+    value.insert(QStringLiteral("role"), user.role);
+    value.insert(QStringLiteral("enabled"), user.enabled);
+    value.insert(QStringLiteral("created_at"), user.createdAt);
+    return value;
+}
+
+}
+
+lib::Result UserService::addUser(
+    const lib::OperatorContext &context,
+    const QVariantMap &fields)
+{
+    const QString username = fields.value(QStringLiteral("username"))
+                                 .toString();
+    const QString displayName = fields.value(QStringLiteral("display_name"),
+                                              fields.value(QStringLiteral("displayName")))
+                                    .toString();
+    const QString password = fields.value(QStringLiteral("password"))
+                                 .toString();
+    const QString role = fields.value(QStringLiteral("role"))
+                             .toString();
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    if (!addUser(session, username, displayName, password, role, &error)) {
+        return userFailure(error);
+    }
+    QVariantMap data;
+    data.insert(QStringLiteral("username"), username.trimmed());
+    data.insert(QStringLiteral("display_name"), displayName.trimmed());
+    data.insert(QStringLiteral("role"), role.trimmed().toLower());
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("新增用户成功"),
+                       data,
+                       {},
+                       1};
+}
+
+lib::Result UserService::updateUser(
+    const lib::OperatorContext &context,
+    qint64 userId,
+    const QVariantMap &fields)
+{
+    const QString username = fields.value(QStringLiteral("username"))
+                                 .toString();
+    const QString displayName = fields.value(QStringLiteral("display_name"),
+                                              fields.value(QStringLiteral("displayName")))
+                                    .toString();
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    if (!updateUser(session, userId, username, displayName, &error)) {
+        return userFailure(error);
+    }
+    QVariantMap data;
+    data.insert(QStringLiteral("user_id"), userId);
+    data.insert(QStringLiteral("username"), username.trimmed());
+    data.insert(QStringLiteral("display_name"), displayName.trimmed());
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("用户资料已更新"),
+                       data,
+                       {},
+                       1};
+}
+
+lib::Result UserService::resetPassword(
+    const lib::OperatorContext &context,
+    qint64 userId,
+    const QString &newPassword)
+{
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    if (!resetPassword(session, userId, newPassword, &error)) {
+        return userFailure(error);
+    }
+    QVariantMap data;
+    data.insert(QStringLiteral("user_id"), userId);
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("密码已重置"),
+                       data,
+                       {},
+                       1};
+}
+
+lib::Result UserService::assignRole(
+    const lib::OperatorContext &context,
+    qint64 userId,
+    const QString &role)
+{
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    if (!assignRole(session, userId, role, &error)) {
+        return userFailure(error);
+    }
+    QVariantMap data;
+    data.insert(QStringLiteral("user_id"), userId);
+    data.insert(QStringLiteral("role"), role.trimmed().toLower());
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("用户角色已更新"),
+                       data,
+                       {},
+                       1};
+}
+
+lib::Result UserService::setUserStatus(
+    const lib::OperatorContext &context,
+    qint64 userId,
+    bool enabled)
+{
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    if (!setUserStatus(session, userId, enabled, &error)) {
+        return userFailure(error);
+    }
+    QVariantMap data;
+    data.insert(QStringLiteral("user_id"), userId);
+    data.insert(QStringLiteral("enabled"), enabled);
+    return lib::Result{lib::ErrorCode::Success,
+                       enabled ? QStringLiteral("用户已启用")
+                               : QStringLiteral("用户已停用"),
+                       data,
+                       {},
+                       1};
+}
+
+lib::Result UserService::getUser(
+    const lib::OperatorContext &context,
+    qint64 userId) const
+{
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    const auto user = getUser(session, userId, &error);
+    if (!user.has_value()) {
+        return userFailure(error);
+    }
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("查询用户成功"),
+                       userToMap(*user),
+                       {},
+                       1};
+}
+
+lib::Result UserService::listUsers(
+    const lib::OperatorContext &context,
+    const QVariantMap &filter,
+    int page,
+    int pageSize) const
+{
+    if (!lib::pageParamsValid(page, pageSize)) {
+        return lib::Result::fail(
+            lib::ErrorCode::InvalidPage,
+            QStringLiteral("分页参数非法"));
+    }
+
+    UserQuery query;
+    query.keyword = filter.value(QStringLiteral("keyword")).toString();
+    query.role = filter.value(QStringLiteral("role")).toString();
+    if (filter.contains(QStringLiteral("enabled"))) {
+        query.enabled = filter.value(QStringLiteral("enabled")).toBool();
+    }
+    query.page = page;
+    query.pageSize = pageSize;
+
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    const UserPage result = listUsers(session, query, &error);
+    if (!error.isEmpty()) {
+        return userFailure(error);
+    }
+
+    QVariantList list;
+    for (const UserInfo &user : result.items) {
+        list.append(userToMap(user));
+    }
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("查询用户成功"),
+                       {},
+                       list,
+                       result.total};
 }
 
 std::optional<UserInfo> UserService::getUser(
@@ -618,6 +834,10 @@ bool UserService::resetPassword(
         }
         return false;
     }
+
+    // 密码重置后，目标账号已有会话必须立即失效；新登录会获得新的代次。
+    PermissionService::invalidateUserSessions(
+        static_cast<int>(userId));
 
     if (error) {
         error->clear();

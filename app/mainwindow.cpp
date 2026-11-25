@@ -202,23 +202,37 @@ QWidget *MainWindow::buildShellPage()
 void MainWindow::handleLogin()
 {
     m_loginError->clear();
-    QString error;
-    const auto session =
-        m_authService.login(m_usernameEdit->text(),
-                            m_passwordEdit->text(), &error);
-    if (!session.has_value()) {
-        m_loginError->setText(error);
+    const lib::Result result = m_authService.login(
+        m_usernameEdit->text(), m_passwordEdit->text());
+    if (!result.ok()) {
+        m_loginError->setText(result.message);
         m_passwordEdit->selectAll();
         m_passwordEdit->setFocus();
         return;
     }
 
-    if (!session->isAdmin() && !session->isLibrarian()) {
+    const QString roleName = result.data.value(
+        QStringLiteral("role")).toString();
+    const lib::Role role = roleName == QStringLiteral("admin")
+        ? lib::Role::Admin
+        : (roleName == QStringLiteral("librarian")
+               ? lib::Role::Librarian
+               : lib::Role::Reader);
+    const lib::OperatorContext context{
+        result.data.value(QStringLiteral("user_id")).toLongLong(),
+        result.data.value(QStringLiteral("user_name")).toString(),
+        role,
+        result.data.value(QStringLiteral("authenticated")).toBool(),
+        result.data.value(QStringLiteral("session_generation")).toLongLong()};
+
+    if (!context.isStaff()) {
         m_loginError->setText(QStringLiteral("馆务工作台仅供管理员和馆员使用"));
         return;
     }
 
-    m_session = *session;
+    m_session = UserSession::fromOperatorContext(context);
+    m_session.displayName = result.data.value(
+        QStringLiteral("display_name")).toString();
     if (!m_pages) {
         m_rootStack->addWidget(buildShellPage());
     }
@@ -235,7 +249,9 @@ void MainWindow::handleLogin()
 
 void MainWindow::handleLogout()
 {
-    AuthService::logout(m_session);
+    lib::OperatorContext context = operatorContext();
+    m_authService.logout(context);
+    m_session.clear();
     m_usernameEdit->setText(QStringLiteral("admin"));
     m_passwordEdit->setText(QStringLiteral("admin123"));
     m_loginError->clear();
@@ -245,11 +261,12 @@ void MainWindow::handleLogout()
 
 bool MainWindow::checkPermission(Permission permission)
 {
-    QString error;
-    if (PermissionService::requirePermission(m_session, permission, &error)) {
+    const lib::Result result = PermissionService::requirePermission(
+        operatorContext(), permission);
+    if (result.ok()) {
         return true;
     }
-    showStatus(error, false);
+    showStatus(result.message, false);
     return false;
 }
 

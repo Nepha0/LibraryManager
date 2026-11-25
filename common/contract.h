@@ -136,6 +136,33 @@ enum class ErrorCode {
     DbError                 = 1999  // 数据库错误
 };
 
+// ===================== B 段错误码（2000~2999） =====================
+// B 的业务错误码集中登记在这里，避免各 Service 自己定义字符串错误风格。
+enum class ErrorCodeB {
+    InvalidCredentials       = 2001, // 账号或密码错误
+    AccountDisabled          = 2002, // 账号已停用
+    UnsupportedRole          = 2003, // 角色不支持
+    UserNotFound             = 2004, // 用户不存在
+    InvalidUserId            = 2005, // 用户 ID 非法
+    SelfModificationDenied   = 2006, // 不允许修改/停用当前账号
+    UserDuplicate            = 2007, // 账号已存在
+    ReaderNotFound           = 2101, // 读者不存在
+    ReaderNoDuplicate        = 2102, // 读者证号重复
+    ReaderDisabled           = 2103, // 读者已停用
+    AccountLinkedDisabled    = 2104, // 关联账号已停用
+    BorrowLimitReached       = 2105, // 已达到借阅上限
+    ReaderHasBorrowRecords   = 2106, // 读者存在未归还借阅
+    InvalidReaderId           = 2107, // 读者 ID 非法
+    ParamNotFound             = 2201, // 系统参数不存在
+    InvalidParamValue         = 2202, // 系统参数值非法
+    LogQueryDenied            = 2301  // 无权查看操作日志
+};
+
+inline ErrorCode toErrorCode(ErrorCodeB code)
+{
+    return static_cast<ErrorCode>(static_cast<int>(code));
+}
+
 // ===================== 统一返回结构 =====================
 struct Result {
     ErrorCode    code = ErrorCode::Success;
@@ -162,6 +189,11 @@ struct Result {
         return r;
     }
 };
+
+inline Result failB(ErrorCodeB code, const QString& message)
+{
+    return Result::fail(toErrorCode(code), message);
+}
 
 // 分页参数合法性校验（page 从 1 开始）
 inline bool pageParamsValid(int page, int pageSize)

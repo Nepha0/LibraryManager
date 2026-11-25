@@ -9,10 +9,15 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
 using namespace WindowWidgets;
+
+namespace {
+constexpr int ReaderPageSize = 50;
+}
 
 QWidget *MainWindow::buildReadersPage()
 {
@@ -132,7 +137,28 @@ QWidget *MainWindow::buildReadersPage()
     });
 
     readersLayout->addWidget(m_readersTable);
+
+    auto *pagination = new QHBoxLayout;
+    m_readerPreviousPage = new QPushButton(QStringLiteral("上一页"));
+    m_readerNextPage = new QPushButton(QStringLiteral("下一页"));
+    m_readerPageLabel = makeLabel(QString());
+    m_readerPreviousPage->setEnabled(false);
+    m_readerNextPage->setEnabled(false);
+    pagination->addStretch();
+    pagination->addWidget(m_readerPreviousPage);
+    pagination->addWidget(m_readerPageLabel);
+    pagination->addWidget(m_readerNextPage);
+    readersLayout->addLayout(pagination);
     layout->addWidget(readersPanel, 1);
+
+    connect(m_readerPreviousPage, &QPushButton::clicked, this, [this] {
+        --m_readerPage;
+        refreshReaders();
+    });
+    connect(m_readerNextPage, &QPushButton::clicked, this, [this] {
+        ++m_readerPage;
+        refreshReaders();
+    });
 
     connect(
         addButton,
@@ -191,7 +217,9 @@ QWidget *MainWindow::buildReadersPage()
         [this] {
             m_readerFilterNo->clear();
             m_readerFilterName->clear();
+            const QSignalBlocker blocker(m_readerFilterStatus);
             m_readerFilterStatus->setCurrentIndex(0);
+            m_readerPage = 1;
             refreshReaders();
         });
 
@@ -212,11 +240,15 @@ QWidget *MainWindow::buildReadersPage()
 
 void MainWindow::addReader()
 {
-    QString error;
-    if (!m_readerService.addReader(
-            m_session, m_readerNo->text(), m_readerName->text(),
-            m_readerPhone->text(), &error)) {
-        QMessageBox::warning(this, QStringLiteral("无法登记读者"), error);
+    QVariantMap fields;
+    fields.insert(QStringLiteral("reader_no"), m_readerNo->text());
+    fields.insert(QStringLiteral("name"), m_readerName->text());
+    fields.insert(QStringLiteral("phone"), m_readerPhone->text());
+    const lib::Result result = m_readerService.addReader(
+        operatorContext(), fields);
+    if (!result.ok()) {
+        QMessageBox::warning(this, QStringLiteral("无法登记读者"),
+                             result.message);
         return;
     }
     const QString name = m_readerName->text().trimmed();
@@ -288,29 +320,26 @@ void MainWindow::showSelectedReaderDetail()
         return;
     }
 
-    QString error;
-    const auto detail =
-        m_readerService.getReader(
-            m_session, readerId, &error);
-
-    if (!detail.has_value()) {
+    const lib::Result result = m_readerService.getReader(
+        operatorContext(), readerId);
+    if (!result.ok()) {
         QMessageBox::warning(
             this,
             QStringLiteral("无法读取读者详情"),
-            error);
+            result.message);
         return;
     }
 
-    m_selectedReaderId = detail->info.id;
-    m_selectedReaderEnabled =
-        detail->info.enabled;
+    const QVariantMap detail = result.data;
+    m_selectedReaderId = detail.value(QStringLiteral("reader_id")).toInt();
+    m_selectedReaderEnabled = detail.value(QStringLiteral("enabled")).toBool();
 
     m_readerNo->setText(
-        detail->info.readerNo);
+        detail.value(QStringLiteral("reader_no")).toString());
     m_readerName->setText(
-        detail->info.name);
+        detail.value(QStringLiteral("name")).toString());
     m_readerPhone->setText(
-        detail->info.phone);
+        detail.value(QStringLiteral("phone")).toString());
 
     m_readerDetail->setText(
         QStringLiteral(
@@ -318,13 +347,13 @@ void MainWindow::showSelectedReaderDetail()
             "累计借阅：%3　已归还：%4　"
             "当前逾期：%5")
             .arg(
-                detail->info.enabled
+                detail.value(QStringLiteral("enabled")).toBool()
                     ? QStringLiteral("正常")
                     : QStringLiteral("停用"))
-            .arg(detail->info.activeLoans)
-            .arg(detail->totalLoans)
-            .arg(detail->returnedLoans)
-            .arg(detail->overdueLoans));
+            .arg(detail.value(QStringLiteral("active_loans")).toInt())
+            .arg(detail.value(QStringLiteral("total_loans")).toInt())
+            .arg(detail.value(QStringLiteral("returned_loans")).toInt())
+            .arg(detail.value(QStringLiteral("overdue_loans")).toInt()));
 }
 
 void MainWindow::updateSelectedReader()
@@ -341,18 +370,17 @@ void MainWindow::updateSelectedReader()
     const QString readerName =
         m_readerName->text().trimmed();
 
-    QString error;
-    if (!m_readerService.updateReader(
-            m_session,
-            m_selectedReaderId,
-            m_readerNo->text(),
-            m_readerName->text(),
-            m_readerPhone->text(),
-            &error)) {
+    QVariantMap fields;
+    fields.insert(QStringLiteral("reader_no"), m_readerNo->text());
+    fields.insert(QStringLiteral("name"), m_readerName->text());
+    fields.insert(QStringLiteral("phone"), m_readerPhone->text());
+    const lib::Result result = m_readerService.updateReader(
+        operatorContext(), m_selectedReaderId, fields);
+    if (!result.ok()) {
         QMessageBox::warning(
             this,
             QStringLiteral("无法修改读者"),
-            error);
+            result.message);
         return;
     }
 
@@ -399,16 +427,13 @@ void MainWindow::toggleSelectedReaderStatus()
         return;
     }
 
-    QString error;
-    if (!m_readerService.setReaderStatus(
-            m_session,
-            m_selectedReaderId,
-            targetEnabled,
-            &error)) {
+    const lib::Result result = m_readerService.setReaderStatus(
+        operatorContext(), m_selectedReaderId, targetEnabled);
+    if (!result.ok()) {
         QMessageBox::warning(
             this,
             QStringLiteral("无法修改读者状态"),
-            error);
+            result.message);
         return;
     }
 
@@ -426,81 +451,105 @@ void MainWindow::toggleSelectedReaderStatus()
 
 void MainWindow::refreshReaders()
 {
-    ReaderQuery query;
+    QVariantMap filter;
 
     if (m_readerFilterNo) {
-        query.readerNo =
-            m_readerFilterNo->text().trimmed();
+        filter.insert(QStringLiteral("reader_no"),
+                      m_readerFilterNo->text().trimmed());
     }
 
     if (m_readerFilterName) {
-        query.name =
-            m_readerFilterName->text().trimmed();
+        filter.insert(QStringLiteral("name"),
+                      m_readerFilterName->text().trimmed());
     }
 
     if (m_readerFilterStatus) {
         if (m_readerFilterStatus->currentIndex() == 1) {
-            query.enabled = true;
+            filter.insert(QStringLiteral("enabled"), true);
         } else if (m_readerFilterStatus->currentIndex() == 2) {
-            query.enabled = false;
+            filter.insert(QStringLiteral("enabled"), false);
         }
     }
 
-    QString error;
-    const auto readers =
-        m_readerService.readers(
-            m_session, query, &error);
+    if (filter != m_appliedReaderFilter) {
+        m_appliedReaderFilter = filter;
+        m_readerPage = 1;
+    }
 
-    if (!error.isEmpty()) {
+    const auto pageCount = [](int total) {
+        return total > 0 ? (total - 1) / ReaderPageSize + 1 : 1;
+    };
+    lib::Result result = m_readerService.listReaders(
+        operatorContext(), filter, m_readerPage, ReaderPageSize);
+    if (result.ok() && m_readerPage > pageCount(result.total)) {
+        m_readerPage = pageCount(result.total);
+        result = m_readerService.listReaders(
+            operatorContext(), filter, m_readerPage, ReaderPageSize);
+    }
+
+    const QSignalBlocker selectionBlocker(m_readersTable);
+    m_readersTable->clearSelection();
+    m_readersTable->setCurrentCell(-1, -1);
+    m_selectedReaderId = 0;
+    m_selectedReaderEnabled = true;
+    m_readerDetail->setText(QStringLiteral("选择读者后显示详情与借阅概况"));
+
+    if (!result.ok()) {
+        m_readerPreviousPage->setEnabled(false);
+        m_readerNextPage->setEnabled(false);
+        m_readerPageLabel->clear();
         m_readersTable->setRowCount(0);
-        showStatus(error, false);
+        showStatus(result.message, false);
         return;
     }
 
-    m_selectedReaderId = 0;
-    m_selectedReaderEnabled = true;
+    const int pages = pageCount(result.total);
+    m_readerPreviousPage->setEnabled(m_readerPage > 1);
+    m_readerNextPage->setEnabled(m_readerPage < pages);
+    m_readerPageLabel->setText(QStringLiteral("第 %1 / %2 页 · 共 %3 条")
+                                   .arg(m_readerPage).arg(pages).arg(result.total));
 
-    if (m_readerDetail) {
-        m_readerDetail->setText(
-            QStringLiteral(
-                "选择读者后显示详情与借阅概况"));
-    }
-
+    const QVariantList readers = result.list;
     m_readersTable->setRowCount(readers.size());
 
     for (int row = 0; row < readers.size(); ++row) {
-        const auto &reader = readers.at(row);
+        const QVariantMap reader = readers.at(row).toMap();
 
         auto *readerNoItem =
-            new QTableWidgetItem(reader.readerNo);
+            new QTableWidgetItem(
+                reader.value(QStringLiteral("reader_no")).toString());
 
         // 后续选中、修改和启停时通过这里取得数据库 ID。
         readerNoItem->setData(
-            Qt::UserRole, reader.id);
+            Qt::UserRole,
+            reader.value(QStringLiteral("reader_id")).toLongLong());
 
         m_readersTable->setItem(
             row, 0, readerNoItem);
 
         m_readersTable->setItem(
             row, 1,
-            new QTableWidgetItem(reader.name));
+            new QTableWidgetItem(
+                reader.value(QStringLiteral("name")).toString()));
 
         m_readersTable->setItem(
             row, 2,
-            new QTableWidgetItem(reader.phone));
+            new QTableWidgetItem(
+                reader.value(QStringLiteral("phone")).toString()));
 
         m_readersTable->setItem(
             row, 3,
             new QTableWidgetItem(
-                QString::number(reader.activeLoans)));
+                QString::number(
+                    reader.value(QStringLiteral("active_loans")).toInt())));
 
         auto *statusItem =
             new QTableWidgetItem(
-                reader.enabled
+                reader.value(QStringLiteral("enabled")).toBool()
                     ? QStringLiteral("正常")
                     : QStringLiteral("停用"));
 
-        if (!reader.enabled) {
+        if (!reader.value(QStringLiteral("enabled")).toBool()) {
             statusItem->setForeground(
                 QColor(QStringLiteral("#B43838")));
         }
