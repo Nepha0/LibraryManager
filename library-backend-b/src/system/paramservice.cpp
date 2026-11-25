@@ -26,6 +26,95 @@ const QSet<QString> &supportedParamKeys()
     return keys;
 }
 
+lib::Result paramFailure(const QString &error)
+{
+    if (error == QStringLiteral("请先登录")
+        || error == QStringLiteral("登录状态已失效，请重新登录")) {
+        return lib::Result::fail(lib::ErrorCode::NotAuthenticated, error);
+    }
+    if (error == QStringLiteral("无权限")) {
+        return lib::Result::fail(lib::ErrorCode::NoPermission, error);
+    }
+    if (error.contains(QStringLiteral("系统参数不存在"))) {
+        return lib::failB(lib::ErrorCodeB::ParamNotFound, error);
+    }
+    if (error.contains(QStringLiteral("参数值"))
+        || error.contains(QStringLiteral("有效整数"))) {
+        return lib::failB(lib::ErrorCodeB::InvalidParamValue, error);
+    }
+    return lib::Result::fail(
+        lib::ErrorCode::DbError,
+        error.isEmpty() ? QStringLiteral("系统参数操作失败") : error);
+}
+
+}
+
+lib::Result ParamService::getParam(
+    const lib::OperatorContext &context,
+    const QString &key) const
+{
+    const lib::Result sessionCheck = PermissionService::requirePermission(
+        context, Permission::ViewBooks);
+    if (!sessionCheck.ok()) {
+        return sessionCheck;
+    }
+    QString error;
+    const auto value = getParam(key, &error);
+    if (!value.has_value()) {
+        return paramFailure(error);
+    }
+    QVariantMap data;
+    data.insert(QStringLiteral("key"), key.trimmed());
+    data.insert(QStringLiteral("value"), *value);
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("读取系统参数成功"),
+                       data,
+                       {},
+                       1};
+}
+
+lib::Result ParamService::getIntParam(
+    const lib::OperatorContext &context,
+    const QString &key) const
+{
+    const lib::Result sessionCheck = PermissionService::requirePermission(
+        context, Permission::ViewBooks);
+    if (!sessionCheck.ok()) {
+        return sessionCheck;
+    }
+    QString error;
+    const auto value = getIntParam(key, &error);
+    if (!value.has_value()) {
+        return paramFailure(error);
+    }
+    QVariantMap data;
+    data.insert(QStringLiteral("key"), key.trimmed());
+    data.insert(QStringLiteral("value"), *value);
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("读取系统参数成功"),
+                       data,
+                       {},
+                       1};
+}
+
+lib::Result ParamService::setParam(
+    const lib::OperatorContext &context,
+    const QString &key,
+    const QString &value)
+{
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    if (!setParam(session, key, value, &error)) {
+        return paramFailure(error);
+    }
+    QVariantMap data;
+    data.insert(QStringLiteral("key"), key.trimmed());
+    data.insert(QStringLiteral("value"), value.trimmed());
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("系统参数已更新"),
+                       data,
+                       {},
+                       1};
 }
 
 std::optional<QString> ParamService::getParam(const QString &key,

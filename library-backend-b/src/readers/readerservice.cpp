@@ -9,6 +9,301 @@
 #include <QSqlQuery>
 #include <QVariant>
 
+namespace {
+
+lib::Result readerFailure(const QString &error)
+{
+    if (error == QStringLiteral("请先登录")
+        || error == QStringLiteral("登录状态已失效，请重新登录")) {
+        return lib::Result::fail(lib::ErrorCode::NotAuthenticated, error);
+    }
+    if (error == QStringLiteral("无权限")) {
+        return lib::Result::fail(lib::ErrorCode::NoPermission, error);
+    }
+    if (error == QStringLiteral("读者不存在")) {
+        return lib::failB(lib::ErrorCodeB::ReaderNotFound, error);
+    }
+    if (error == QStringLiteral("无效的读者ID")) {
+        return lib::failB(lib::ErrorCodeB::InvalidReaderId, error);
+    }
+    if (error == QStringLiteral("该读者编号已存在")) {
+        return lib::failB(lib::ErrorCodeB::ReaderNoDuplicate, error);
+    }
+    if (error == QStringLiteral("读者有未归还图书，不能停用")) {
+        return lib::failB(lib::ErrorCodeB::ReaderHasBorrowRecords, error);
+    }
+    return lib::Result::fail(
+        lib::ErrorCode::DbError,
+        error.isEmpty() ? QStringLiteral("读者操作失败") : error);
+}
+
+QVariantMap readerToMap(const ReaderInfo &reader)
+{
+    QVariantMap value;
+    value.insert(QStringLiteral("reader_id"), reader.id);
+    value.insert(QStringLiteral("reader_no"), reader.readerNo);
+    value.insert(QStringLiteral("name"), reader.name);
+    value.insert(QStringLiteral("phone"), reader.phone);
+    value.insert(QStringLiteral("active_loans"), reader.activeLoans);
+    value.insert(QStringLiteral("enabled"), reader.enabled);
+    return value;
+}
+
+QVariantMap readerDetailToMap(const ReaderDetail &detail)
+{
+    QVariantMap value = readerToMap(detail.info);
+    value.insert(QStringLiteral("total_loans"), detail.totalLoans);
+    value.insert(QStringLiteral("returned_loans"), detail.returnedLoans);
+    value.insert(QStringLiteral("overdue_loans"), detail.overdueLoans);
+    // 这些字段由 C 侧在联调时补充当前预约和实时逾期聚合；B 先保留稳定的契约位。
+    value.insert(QStringLiteral("current_loan_count"), detail.info.activeLoans);
+    value.insert(QStringLiteral("current_reservation_count"), 0);
+    value.insert(QStringLiteral("overdue_count"), detail.overdueLoans);
+    return value;
+}
+
+}
+
+lib::Result ReaderService::addReader(
+    const lib::OperatorContext &context,
+    const QVariantMap &fields)
+{
+    const QString readerNo = fields.value(QStringLiteral("reader_no"),
+                                           fields.value(QStringLiteral("readerNo")))
+                                 .toString();
+    const QString name = fields.value(QStringLiteral("name"))
+                             .toString();
+    const QString phone = fields.value(QStringLiteral("phone"))
+                              .toString();
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    if (!addReader(session, readerNo, name, phone, &error)) {
+        return readerFailure(error);
+    }
+    QVariantMap data;
+    data.insert(QStringLiteral("reader_no"), readerNo.trimmed());
+    data.insert(QStringLiteral("name"), name.trimmed());
+    data.insert(QStringLiteral("phone"), phone.trimmed());
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("新增读者成功"),
+                       data,
+                       {},
+                       1};
+}
+
+lib::Result ReaderService::updateReader(
+    const lib::OperatorContext &context,
+    qint64 readerId,
+    const QVariantMap &fields)
+{
+    const QString readerNo = fields.value(QStringLiteral("reader_no"),
+                                           fields.value(QStringLiteral("readerNo")))
+                                 .toString();
+    const QString name = fields.value(QStringLiteral("name"))
+                             .toString();
+    const QString phone = fields.value(QStringLiteral("phone"))
+                              .toString();
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    if (!updateReader(session, static_cast<int>(readerId), readerNo, name,
+                      phone, &error)) {
+        return readerFailure(error);
+    }
+    QVariantMap data;
+    data.insert(QStringLiteral("reader_id"), readerId);
+    data.insert(QStringLiteral("reader_no"), readerNo.trimmed());
+    data.insert(QStringLiteral("name"), name.trimmed());
+    data.insert(QStringLiteral("phone"), phone.trimmed());
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("读者资料已更新"),
+                       data,
+                       {},
+                       1};
+}
+
+lib::Result ReaderService::setReaderStatus(
+    const lib::OperatorContext &context,
+    qint64 readerId,
+    bool enabled)
+{
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    if (!setReaderStatus(session, static_cast<int>(readerId), enabled,
+                         &error)) {
+        return readerFailure(error);
+    }
+    QVariantMap data;
+    data.insert(QStringLiteral("reader_id"), readerId);
+    data.insert(QStringLiteral("enabled"), enabled);
+    return lib::Result{lib::ErrorCode::Success,
+                       enabled ? QStringLiteral("读者已启用")
+                               : QStringLiteral("读者已停用"),
+                       data,
+                       {},
+                       1};
+}
+
+lib::Result ReaderService::checkReaderEligibility(
+    const lib::OperatorContext &context,
+    qint64 readerId) const
+{
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    const ReaderEligibilityResult eligibility =
+        checkReaderEligibility(session, static_cast<int>(readerId), &error);
+    if (!error.isEmpty()) {
+        return readerFailure(error);
+    }
+    QVariantMap data;
+    data.insert(QStringLiteral("reader_id"), readerId);
+    data.insert(QStringLiteral("eligible"), eligibility.eligible);
+    data.insert(QStringLiteral("reader_enabled"), eligibility.readerEnabled);
+    data.insert(QStringLiteral("account_enabled"), eligibility.accountEnabled);
+    data.insert(QStringLiteral("active_loans"), eligibility.activeLoans);
+    data.insert(QStringLiteral("borrow_limit"), eligibility.borrowLimit);
+    QVariantList reasons;
+    for (const QString &reason : eligibility.reasons) {
+        reasons.append(reason);
+    }
+    data.insert(QStringLiteral("reasons"), reasons);
+    return lib::Result{lib::ErrorCode::Success,
+                       eligibility.reason,
+                       data,
+                       {},
+                       1};
+}
+
+lib::Result ReaderService::checkReaderEligibility(qint64 readerId) const
+{
+    if (readerId <= 0) {
+        return lib::failB(lib::ErrorCodeB::InvalidReaderId,
+                          QStringLiteral("无效的读者ID"));
+    }
+
+    ParamService paramService;
+    QString error;
+    const auto borrowLimit = paramService.getIntParam(
+        QStringLiteral("borrow_limit"), &error);
+    if (!borrowLimit.has_value()) {
+        return readerFailure(error);
+    }
+    if (*borrowLimit <= 0) {
+        return lib::failB(lib::ErrorCodeB::InvalidParamValue,
+                          QStringLiteral("借阅上限配置无效"));
+    }
+
+    QSqlQuery query(Database::connection());
+    query.prepare(QStringLiteral(
+        "SELECT r.active, COALESCE(u.active, 1), COUNT(l.id) "
+        "FROM readers r "
+        "LEFT JOIN users u ON u.id = r.user_id "
+        "LEFT JOIN loans l ON l.reader_id = r.id "
+        "AND l.returned_at IS NULL "
+        "WHERE r.id = ? "
+        "GROUP BY r.id, r.active, u.active"));
+    query.addBindValue(readerId);
+    if (!query.exec()) {
+        return lib::Result::fail(
+            lib::ErrorCode::DbError,
+            QStringLiteral("检查读者借阅资格失败"));
+    }
+    if (!query.next()) {
+        return lib::failB(lib::ErrorCodeB::ReaderNotFound,
+                          QStringLiteral("读者不存在"));
+    }
+
+    const bool readerEnabled = query.value(0).toInt() == 1;
+    const bool accountEnabled = query.value(1).toInt() == 1;
+    const int activeLoans = query.value(2).toInt();
+    QStringList reasons;
+    if (!readerEnabled) {
+        reasons.append(QStringLiteral("读者已停用"));
+    }
+    if (!accountEnabled) {
+        reasons.append(QStringLiteral("关联账号已停用"));
+    }
+    if (activeLoans >= *borrowLimit) {
+        reasons.append(QStringLiteral("已达到借阅上限"));
+    }
+
+    QVariantMap data;
+    data.insert(QStringLiteral("reader_id"), readerId);
+    data.insert(QStringLiteral("eligible"), reasons.isEmpty());
+    data.insert(QStringLiteral("reader_enabled"), readerEnabled);
+    data.insert(QStringLiteral("account_enabled"), accountEnabled);
+    data.insert(QStringLiteral("active_loans"), activeLoans);
+    data.insert(QStringLiteral("borrow_limit"), *borrowLimit);
+    QVariantList reasonList;
+    for (const QString &reason : reasons) {
+        reasonList.append(reason);
+    }
+    data.insert(QStringLiteral("reasons"), reasonList);
+    return lib::Result{lib::ErrorCode::Success,
+                       reasons.join(QStringLiteral("；")),
+                       data,
+                       {},
+                       1};
+}
+
+lib::Result ReaderService::getReader(
+    const lib::OperatorContext &context,
+    qint64 readerId) const
+{
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    const auto detail = getReader(session, static_cast<int>(readerId), &error);
+    if (!detail.has_value()) {
+        return readerFailure(error);
+    }
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("查询读者详情成功"),
+                       readerDetailToMap(*detail),
+                       {},
+                       1};
+}
+
+lib::Result ReaderService::listReaders(
+    const lib::OperatorContext &context,
+    const QVariantMap &filter,
+    int page,
+    int pageSize) const
+{
+    if (!lib::pageParamsValid(page, pageSize)) {
+        return lib::Result::fail(lib::ErrorCode::InvalidPage,
+                                 QStringLiteral("分页参数非法"));
+    }
+
+    ReaderQuery query;
+    query.readerNo = filter.value(QStringLiteral("reader_no"),
+                                  filter.value(QStringLiteral("readerNo")))
+                         .toString();
+    query.name = filter.value(QStringLiteral("name")).toString();
+    if (filter.contains(QStringLiteral("enabled"))) {
+        query.enabled = filter.value(QStringLiteral("enabled")).toBool();
+    }
+
+    QString error;
+    const UserSession session = UserSession::fromOperatorContext(context);
+    const QVector<ReaderInfo> all = readers(session, query, &error);
+    if (!error.isEmpty()) {
+        return readerFailure(error);
+    }
+
+    const int total = all.size();
+    const int offset = (page - 1) * pageSize;
+    QVariantList list;
+    for (int index = offset;
+         index < qMin(offset + pageSize, total);
+         ++index) {
+        list.append(readerToMap(all.at(index)));
+    }
+    return lib::Result{lib::ErrorCode::Success,
+                       QStringLiteral("查询读者成功"),
+                       {},
+                       list,
+                       total};
+}
+
 bool ReaderService::addReader(const UserSession &session,
                               const QString &readerNo,
                               const QString &name,

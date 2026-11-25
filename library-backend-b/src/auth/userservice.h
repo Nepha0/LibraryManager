@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/contract.h"
 #include <QDateTime>
 #include <QString>
 #include <QVector>
@@ -37,6 +38,35 @@ struct UserPage
 class UserService
 {
 public:
+    // 统一契约入口。fields 支持 username、display_name、password、role。
+    lib::Result addUser(const lib::OperatorContext &context,
+                        const QVariantMap &fields);
+
+    lib::Result updateUser(const lib::OperatorContext &context,
+                           qint64 userId,
+                           const QVariantMap &fields);
+
+    lib::Result resetPassword(const lib::OperatorContext &context,
+                              qint64 userId,
+                              const QString &newPassword);
+
+    lib::Result assignRole(const lib::OperatorContext &context,
+                           qint64 userId,
+                           const QString &role);
+
+    lib::Result setUserStatus(const lib::OperatorContext &context,
+                              qint64 userId,
+                              bool enabled);
+
+    lib::Result getUser(const lib::OperatorContext &context,
+                        qint64 userId) const;
+
+    lib::Result listUsers(const lib::OperatorContext &context,
+                          const QVariantMap &filter,
+                          int page = 1,
+                          int pageSize = 20) const;
+
+private:
     bool addUser(const UserSession &session,
                  const QString &username,
                  const QString &displayName,

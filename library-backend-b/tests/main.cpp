@@ -7,6 +7,7 @@
 #include "library-backend-b/src/readers/readerservice.h"
 #include "library-backend-b/src/system/operationlogservice.h"
 #include "library-backend-b/src/system/paramservice.h"
+#include "legacy_api_adapter.h"
 #include "statistics/statisticsservice.h"
 
 #include <QCoreApplication>
@@ -14,6 +15,14 @@
 #include <QStringList>
 #include <QSqlError>
 #include <QSqlQuery>
+
+using LegacyAuthService = test_legacy::AuthService;
+using LegacyPermissionService = test_legacy::PermissionService;
+
+// Keep the historical smoke assertions readable while routing them through
+// the contract-only test adapters above.
+#define AuthService LegacyAuthService
+#define PermissionService LegacyPermissionService
 
 namespace {
 
@@ -25,6 +34,24 @@ bool check(bool condition, const QString &name)
         qCritical().noquote() << "[FAIL]" << name;
     }
     return condition;
+}
+
+lib::OperatorContext contextFromLoginResult(const lib::Result &result)
+{
+    const QVariantMap &data = result.data;
+    lib::Role role = lib::Role::Reader;
+    const QString roleName = data.value(QStringLiteral("role")).toString();
+    if (roleName == QStringLiteral("admin")) {
+        role = lib::Role::Admin;
+    } else if (roleName == QStringLiteral("librarian")) {
+        role = lib::Role::Librarian;
+    }
+    return {
+        data.value(QStringLiteral("user_id")).toLongLong(),
+        data.value(QStringLiteral("user_name")).toString(),
+        role,
+        data.value(QStringLiteral("authenticated")).toBool(),
+        data.value(QStringLiteral("session_generation")).toLongLong()};
 }
 
 }
@@ -62,6 +89,63 @@ int main(int argc, char *argv[])
     allPassed &= check(
         admin->isAuthenticated() && admin->isAdmin(),
         QStringLiteral("管理员会话状态正确"));
+
+    const lib::Result contractLogin = AuthService::login(
+        QStringLiteral("admin"), QStringLiteral("admin123"));
+    allPassed &= check(
+        contractLogin.ok()
+            && contractLogin.data.value(QStringLiteral("user_name"))
+                   .toString() == QStringLiteral("admin"),
+        QStringLiteral("统一契约登录返回操作者上下文"));
+
+    const lib::OperatorContext contractAdmin =
+        contextFromLoginResult(contractLogin);
+    allPassed &= check(
+        PermissionService::requirePermission(
+            contractAdmin, Permission::ManageParams).ok(),
+        QStringLiteral("统一契约权限校验成功"));
+
+    ParamService contractParams;
+    const lib::Result contractParam = contractParams.getIntParam(
+        contractAdmin, QStringLiteral("borrow_limit"));
+    allPassed &= check(
+        contractParam.ok()
+            && contractParam.data.value(QStringLiteral("value"))
+                   .toInt() > 0,
+        QStringLiteral("统一契约读取系统参数成功"));
+
+    UserService contractUsers;
+    const lib::Result contractUserPage = contractUsers.listUsers(
+        contractAdmin, {}, 1, 5);
+    allPassed &= check(
+        contractUserPage.ok() && contractUserPage.total >= 1,
+        QStringLiteral("统一契约分页查询用户成功"));
+    allPassed &= check(
+        contractUsers.listUsers(contractAdmin, {}, 0, 5).code
+            == lib::ErrorCode::InvalidPage,
+        QStringLiteral("统一契约拒绝非法用户分页"));
+
+    ReaderService contractReaders;
+    const lib::Result contractReaderPage = contractReaders.listReaders(
+        contractAdmin, {}, 1, 5);
+    allPassed &= check(
+        contractReaderPage.ok(),
+        QStringLiteral("统一契约分页查询读者成功"));
+    allPassed &= check(
+        contractReaders.listReaders(contractAdmin, {}, 1, 0).code
+            == lib::ErrorCode::InvalidPage,
+        QStringLiteral("统一契约拒绝非法读者分页"));
+
+    OperationLogService contractLogs;
+    const lib::Result contractLogPage = contractLogs.listLogs(
+        contractAdmin, {}, 1, 5);
+    allPassed &= check(
+        contractLogPage.ok(),
+        QStringLiteral("统一契约分页查询操作日志成功"));
+    allPassed &= check(
+        contractLogs.listLogs(contractAdmin, {}, 0, 5).code
+            == lib::ErrorCode::InvalidPage,
+        QStringLiteral("统一契约拒绝非法日志分页"));
 
     allPassed &= check(
         PermissionService::hasPermission(
@@ -155,7 +239,7 @@ int main(int argc, char *argv[])
             QStringLiteral("清理临时停用账号"));
     }
 
-    ParamService params;
+    test_legacy::ParamService params;
     const QStringList integerKeys = {
         QStringLiteral("borrow_period_days"),
         QStringLiteral("borrow_limit"),
@@ -403,7 +487,7 @@ int main(int argc, char *argv[])
     Q_UNUSED(adminBooks);
     Q_UNUSED(librarianAvailableCopies);
 
-    UserService userService;
+    test_legacy::UserService userService;
 
     const QString testUsername =
         QStringLiteral("user-smoke-%1")
@@ -527,6 +611,16 @@ int main(int argc, char *argv[])
                        "不能取消当前登录账号的管理员角色"),
         QStringLiteral("管理员不能取消自己的角色"));
 
+    const auto preResetSession =
+        AuthService::login(
+            updatedUsername,
+            testPassword,
+            &error);
+
+    allPassed &= check(
+        preResetSession.has_value(),
+        QStringLiteral("重置密码前旧会话建立成功"));
+
     const bool passwordReset =
         userService.resetPassword(
             *admin,
@@ -537,6 +631,21 @@ int main(int argc, char *argv[])
     allPassed &= check(
         passwordReset,
         QStringLiteral("管理员重置密码成功"));
+
+    QString passwordResetSessionError;
+    const bool passwordResetSessionAllowed =
+        preResetSession.has_value()
+        && PermissionService::requirePermission(
+            *preResetSession,
+            Permission::ViewBooks,
+            &passwordResetSessionError);
+
+    allPassed &= check(
+        !passwordResetSessionAllowed
+            && passwordResetSessionError
+                   == QStringLiteral(
+                       "登录状态已失效，请重新登录"),
+        QStringLiteral("重置密码后旧会话立即失效"));
 
     const auto oldPasswordLogin =
         AuthService::login(
@@ -686,7 +795,7 @@ int main(int argc, char *argv[])
         QStringLiteral(
             "重新启用后的新会话有效"));
 
-    OperationLogService statusLogService;
+    test_legacy::OperationLogService statusLogService;
     OperationLogQuery statusLogQuery;
     statusLogQuery.actionType =
         QStringLiteral("USER_STATUS_UPDATE");
@@ -711,7 +820,7 @@ int main(int argc, char *argv[])
         foundUserStatusLog,
         QStringLiteral("用户状态修改自动写入操作日志"));
 
-    OperationLogService userLogService;
+    test_legacy::OperationLogService userLogService;
     OperationLogQuery userLogQuery;
     userLogQuery.actionType =
         QStringLiteral("USER_CREATE");
@@ -751,7 +860,7 @@ int main(int argc, char *argv[])
         userCleaned,
         QStringLiteral("清理临时测试用户"));
 
-    ReaderService readerService;
+    test_legacy::ReaderService readerService;
 
     CirculationService circulationService;
 
@@ -1892,7 +2001,7 @@ int main(int argc, char *argv[])
             << "[FAIL] 无法读取原借阅上限：" << error;
     }
 
-    OperationLogService logService;
+    test_legacy::OperationLogService logService;
     OperationLogQuery paramLogQuery;
     paramLogQuery.actionType =
         QStringLiteral("PARAM_UPDATE");
