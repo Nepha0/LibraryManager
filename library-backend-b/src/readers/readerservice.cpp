@@ -277,6 +277,7 @@ lib::Result ReaderService::listReaders(
     query.readerNo = filter.value(QStringLiteral("reader_no"),
                                   filter.value(QStringLiteral("readerNo")))
                          .toString();
+    query.exactReaderNo = filter.value(QStringLiteral("exact_reader_no")).toBool();
     query.name = filter.value(QStringLiteral("name")).toString();
     if (filter.contains(QStringLiteral("enabled"))) {
         query.enabled = filter.value(QStringLiteral("enabled")).toBool();
@@ -290,10 +291,10 @@ lib::Result ReaderService::listReaders(
     }
 
     const int total = all.size();
-    const int offset = (page - 1) * pageSize;
+    const qint64 offset = qint64(page - 1) * pageSize;
+    const qint64 end = qMin<qint64>(offset + pageSize, total);
     QVariantList list;
-    for (int index = offset;
-         index < qMin(offset + pageSize, total);
+    for (qint64 index = offset; index < end;
          ++index) {
         list.append(readerToMap(all.at(index)));
     }
@@ -895,8 +896,9 @@ QVector<ReaderInfo> ReaderService::readers(
         criteria.name.trimmed();
 
     if (!readerNo.isEmpty()) {
-        sql += QStringLiteral(
-            "AND r.reader_no LIKE :reader_no ");
+        sql += criteria.exactReaderNo
+            ? QStringLiteral("AND r.reader_no = :reader_no ")
+            : QStringLiteral("AND r.reader_no LIKE :reader_no ");
     }
 
     if (!name.isEmpty()) {
@@ -920,8 +922,9 @@ QVector<ReaderInfo> ReaderService::readers(
     if (!readerNo.isEmpty()) {
         query.bindValue(
             QStringLiteral(":reader_no"),
-            QStringLiteral("%") + readerNo
-                + QStringLiteral("%"));
+            criteria.exactReaderNo
+                ? readerNo
+                : QStringLiteral("%") + readerNo + QStringLiteral("%"));
     }
 
     if (!name.isEmpty()) {

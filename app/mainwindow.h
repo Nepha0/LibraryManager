@@ -8,11 +8,13 @@
 #include "../library-backend-c/src/contract_c.h"
 
 #include <QMainWindow>
+#include <QVariantMap>
 
 class QComboBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QPushButton;
 class QSpinBox;
 class QStackedWidget;
 class QTableWidget;
@@ -105,6 +107,11 @@ private:
     QLineEdit *m_readerFilterName = nullptr;
     QComboBox *m_readerFilterStatus = nullptr;
     QLabel *m_readerDetail = nullptr;
+    QLabel *m_readerPageLabel = nullptr;
+    QPushButton *m_readerPreviousPage = nullptr;
+    QPushButton *m_readerNextPage = nullptr;
+    QVariantMap m_appliedReaderFilter;
+    int m_readerPage = 1;
     int m_selectedReaderId = 0;
     bool m_selectedReaderEnabled = true;
 

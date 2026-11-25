@@ -35,6 +35,7 @@ struct ReaderQuery
     QString readerNo;
     QString name;
     std::optional<bool> enabled;
+    bool exactReaderNo = false;
 };
 
 struct ReaderDetail
@@ -70,6 +71,7 @@ public:
     lib::Result getReader(const lib::OperatorContext &context,
                           qint64 readerId) const;
 
+    // reader_no uses substring matching unless exact_reader_no is true.
     lib::Result listReaders(const lib::OperatorContext &context,
                             const QVariantMap &filter,
                             int page = 1,

@@ -9,10 +9,15 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
 using namespace WindowWidgets;
+
+namespace {
+constexpr int ReaderPageSize = 50;
+}
 
 QWidget *MainWindow::buildReadersPage()
 {
@@ -132,7 +137,28 @@ QWidget *MainWindow::buildReadersPage()
     });
 
     readersLayout->addWidget(m_readersTable);
+
+    auto *pagination = new QHBoxLayout;
+    m_readerPreviousPage = new QPushButton(QStringLiteral("上一页"));
+    m_readerNextPage = new QPushButton(QStringLiteral("下一页"));
+    m_readerPageLabel = makeLabel(QString());
+    m_readerPreviousPage->setEnabled(false);
+    m_readerNextPage->setEnabled(false);
+    pagination->addStretch();
+    pagination->addWidget(m_readerPreviousPage);
+    pagination->addWidget(m_readerPageLabel);
+    pagination->addWidget(m_readerNextPage);
+    readersLayout->addLayout(pagination);
     layout->addWidget(readersPanel, 1);
+
+    connect(m_readerPreviousPage, &QPushButton::clicked, this, [this] {
+        --m_readerPage;
+        refreshReaders();
+    });
+    connect(m_readerNextPage, &QPushButton::clicked, this, [this] {
+        ++m_readerPage;
+        refreshReaders();
+    });
 
     connect(
         addButton,
@@ -191,7 +217,9 @@ QWidget *MainWindow::buildReadersPage()
         [this] {
             m_readerFilterNo->clear();
             m_readerFilterName->clear();
+            const QSignalBlocker blocker(m_readerFilterStatus);
             m_readerFilterStatus->setCurrentIndex(0);
+            m_readerPage = 1;
             refreshReaders();
         });
 
@@ -443,22 +471,43 @@ void MainWindow::refreshReaders()
         }
     }
 
-    const lib::Result result = m_readerService.listReaders(
-        operatorContext(), filter, 1, 200);
+    if (filter != m_appliedReaderFilter) {
+        m_appliedReaderFilter = filter;
+        m_readerPage = 1;
+    }
+
+    const auto pageCount = [](int total) {
+        return total > 0 ? (total - 1) / ReaderPageSize + 1 : 1;
+    };
+    lib::Result result = m_readerService.listReaders(
+        operatorContext(), filter, m_readerPage, ReaderPageSize);
+    if (result.ok() && m_readerPage > pageCount(result.total)) {
+        m_readerPage = pageCount(result.total);
+        result = m_readerService.listReaders(
+            operatorContext(), filter, m_readerPage, ReaderPageSize);
+    }
+
+    const QSignalBlocker selectionBlocker(m_readersTable);
+    m_readersTable->clearSelection();
+    m_readersTable->setCurrentCell(-1, -1);
+    m_selectedReaderId = 0;
+    m_selectedReaderEnabled = true;
+    m_readerDetail->setText(QStringLiteral("选择读者后显示详情与借阅概况"));
+
     if (!result.ok()) {
+        m_readerPreviousPage->setEnabled(false);
+        m_readerNextPage->setEnabled(false);
+        m_readerPageLabel->clear();
         m_readersTable->setRowCount(0);
         showStatus(result.message, false);
         return;
     }
 
-    m_selectedReaderId = 0;
-    m_selectedReaderEnabled = true;
-
-    if (m_readerDetail) {
-        m_readerDetail->setText(
-            QStringLiteral(
-                "选择读者后显示详情与借阅概况"));
-    }
+    const int pages = pageCount(result.total);
+    m_readerPreviousPage->setEnabled(m_readerPage > 1);
+    m_readerNextPage->setEnabled(m_readerPage < pages);
+    m_readerPageLabel->setText(QStringLiteral("第 %1 / %2 页 · 共 %3 条")
+                                   .arg(m_readerPage).arg(pages).arg(result.total));
 
     const QVariantList readers = result.list;
     m_readersTable->setRowCount(readers.size());

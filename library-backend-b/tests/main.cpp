@@ -16,6 +16,8 @@
 #include <QSqlError>
 #include <QSqlQuery>
 
+#include <limits>
+
 using LegacyAuthService = test_legacy::AuthService;
 using LegacyPermissionService = test_legacy::PermissionService;
 
@@ -135,6 +137,54 @@ int main(int argc, char *argv[])
         contractReaders.listReaders(contractAdmin, {}, 1, 0).code
             == lib::ErrorCode::InvalidPage,
         QStringLiteral("统一契约拒绝非法读者分页"));
+
+    {
+        QSqlDatabase database = Database::connection();
+        bool readerFixturesReady = database.transaction();
+        const bool readerTransactionStarted = readerFixturesReady;
+        const QString readerNo = QStringLiteral("PG%1").arg(
+            QDateTime::currentMSecsSinceEpoch());
+        QSqlQuery insert(database);
+        if (readerFixturesReady) {
+            readerFixturesReady = insert.prepare(QStringLiteral(
+                "INSERT INTO readers (reader_no, name) VALUES (?, 'Pagination test')"));
+        }
+        for (int index = 0; readerFixturesReady && index <= 50; ++index) {
+            const QString fixtureNo = index == 0 ? readerNo
+                : readerNo + QStringLiteral("-%1").arg(index);
+            insert.bindValue(0, fixtureNo);
+            readerFixturesReady = insert.exec();
+        }
+        allPassed &= check(readerFixturesReady, QStringLiteral("读者分页测试数据已建立"));
+
+        if (readerFixturesReady) {
+            QVariantMap filter{{QStringLiteral("reader_no"), readerNo}};
+            const lib::Result firstPage = contractReaders.listReaders(
+                contractAdmin, filter, 1, 50);
+            const lib::Result secondPage = contractReaders.listReaders(
+                contractAdmin, filter, 2, 50);
+            allPassed &= check(firstPage.ok() && firstPage.total == 51
+                && firstPage.list.size() == 50 && secondPage.ok()
+                && secondPage.total == 51 && secondPage.list.size() == 1
+                && secondPage.list.first().toMap().value(QStringLiteral("reader_no")) == readerNo,
+                QStringLiteral("模糊筛选支持跨页并返回正确总数"));
+
+            filter.insert(QStringLiteral("exact_reader_no"), true);
+            const lib::Result exact = contractReaders.listReaders(contractAdmin, filter, 1, 1);
+            allPassed &= check(exact.ok() && exact.total == 1 && exact.list.size() == 1
+                && exact.list.first().toMap().value(QStringLiteral("reader_no")) == readerNo,
+                QStringLiteral("精确编号在 50 个近似编号之前应用筛选"));
+
+            const lib::Result farPage = contractReaders.listReaders(
+                contractAdmin, filter, std::numeric_limits<int>::max(), 50);
+            allPassed &= check(farPage.ok() && farPage.total == 1 && farPage.list.isEmpty(),
+                QStringLiteral("极大页码返回空页且保留总数"));
+        }
+        insert.finish();
+        if (readerTransactionStarted) {
+            allPassed &= check(database.rollback(), QStringLiteral("读者分页测试数据已回滚"));
+        }
+    }
 
     OperationLogService contractLogs;
     const lib::Result contractLogPage = contractLogs.listLogs(

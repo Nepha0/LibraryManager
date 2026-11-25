@@ -172,8 +172,9 @@ int MainWindow::findReaderId(const QString &readerNo, QString *error) const
     }
     QVariantMap filter;
     filter.insert(QStringLiteral("reader_no"), normalizedReaderNo);
+    filter.insert(QStringLiteral("exact_reader_no"), true);
     const lib::Result result = m_readerService.listReaders(
-        operatorContext(), filter, 1, 20);
+        operatorContext(), filter, 1, 1);
     if (!result.ok()) {
         *error = result.message;
         return 0;
