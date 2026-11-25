@@ -28,7 +28,7 @@ library-backend-c/
 │   ├── tests.pro             冒烟测试（无需数据库）
 │   └── test_backend_c.cpp
 └── docs/
-    └── 接口契约-C.md          契约草案（评审后升 V1.0）
+    └── 接口契约-C.md          契约 V1.0（已随 PR #7 合入 main，与 A 端定稿契约对齐）
 ```
 
 ## 构建与测试
@@ -46,5 +46,5 @@ cd tests && nmake && .\backend_c_tests.exe
    的接入点——B 现为 `UserSession + bool` 风格，需 B 迁移到统一基线或提供适配函数。
 2. **A 板块调用**：副本状态变更只走 `CopyService::changeCopyStatus`；C 侧无任何
    直接 UPDATE `book_copies` 的语句。
-3. **表**：`loans` / `reservations` 以 `database/migrations/mysql/003_unified_schema_v1.sql`
-   为准（C 牵头，已评审）。
+3. **表**：`loans` / `reservations` 以定稿的 `library-backend-a/docs/统一MySQL-DDL.md`（V1.1）
+   为唯一事实来源；`003_unified_schema_v1.sql` 仅用于旧库升级（C 牵头，已评审）。
