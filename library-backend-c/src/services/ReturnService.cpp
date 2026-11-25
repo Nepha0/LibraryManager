@@ -10,7 +10,8 @@ ReturnService::ReturnService(QSqlDatabase db, CopyService* copies)
     : m_db(db), m_copies(copies) {}
 
 // ===================== 归还 =====================
-Result ReturnService::returnBook(const OperatorContext& op, const QVariantMap& locator)
+Result ReturnService::returnBook(const OperatorContext& op, const QVariantMap& locator,
+                                 const LoanAuditFn& audit)
 {
     // 1) 操作者校验
     if (!op.authenticated)
@@ -110,6 +111,10 @@ Result ReturnService::returnBook(const OperatorContext& op, const QVariantMap& l
             return rollbackFail(cs.code, cs.message);
         newCopyStatus = QStringLiteral("available");
     }
+
+    QString auditError;
+    if (audit && !audit(loanId, &auditError))
+        return rollbackFail(ErrorCode::DbError, auditError);
 
     // 7) 提交
     if (!m_db.commit())

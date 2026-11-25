@@ -105,6 +105,8 @@ struct EligibilityResult {
 };
 
 using EligibilityFn = std::function<EligibilityResult(qint64 readerId)>;
+// 可选的操作日志写入，同业务事务使用同一数据库连接。
+using LoanAuditFn = std::function<bool(qint64 loanId, QString *error)>;
 
 // ===================== 系统参数只读辅助（键名以 B 端 system_params 为准） =====================
 // 业务层（借阅/续借/预约）统一从参数表读取，禁止硬编码。

@@ -1,7 +1,7 @@
 #include "bookservice.h"
 
 #include "../common/database.h"
-#include "../common/operationlogservice.h"
+#include "../library-backend-b/src/system/operationlogservice.h"
 
 #include <QSqlDatabase>
 #include <QSqlError>

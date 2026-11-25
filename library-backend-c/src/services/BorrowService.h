@@ -25,7 +25,8 @@ public:
     // copies 为 A 端 CopyService（同一条 QSqlDatabase 连接）；eligibility 为 B 端资格判断端口，可为空（仅测试）
     BorrowService(QSqlDatabase db, CopyService* copies, EligibilityFn eligibility);
 
-    Result borrow(const OperatorContext& op, qint64 readerId, const QString& copyBarcode);
+    Result borrow(const OperatorContext& op, qint64 readerId, const QString& copyBarcode,
+                  const LoanAuditFn& audit = {});
     // → data: { loan_id, reader_id, copy_id, book_id, borrowed_at, due_at }（日期 yyyy-MM-dd）
 
     Result getLoan(const OperatorContext& op, qint64 loanId);

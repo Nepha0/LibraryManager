@@ -1,10 +1,11 @@
 #pragma once
 
-#include "../auth/authservice.h"
+#include "../library-backend-b/src/auth/authservice.h"
 #include "../books/bookservice.h"
 #include "../circulation/circulationservice.h"
-#include "../readers/readerservice.h"
+#include "../library-backend-b/src/readers/readerservice.h"
 #include "../statistics/statisticsservice.h"
+#include "../library-backend-c/src/contract_c.h"
 
 #include <QMainWindow>
 
@@ -29,6 +30,7 @@ private:
     QWidget *buildDashboardPage();
     QWidget *buildBooksPage();
     QWidget *buildCirculationPage();
+    QWidget *buildReservationsPage();
     QWidget *buildReadersPage();
     QWidget *buildStatisticsPage();
 
@@ -42,17 +44,23 @@ private:
     void clearReaderSelection();
     void borrowBook();
     void returnSelectedBook();
+    void renewSelectedLoan();
+    void reserveSelectedBook();
+    void cancelSelectedReservation();
     void exportLoans();
     void refreshAll();
     void refreshDashboard();
     void refreshBooks();
     void refreshCopies();
     void refreshCirculation();
+    void refreshReservations();
     void refreshReaders();
     void refreshStatistics();
-    void filterBooks(const QString &text);
-    void setPageTitle(int pageIndex);
     void showStatus(const QString &message, bool success);
+    bool checkPermission(Permission permission);
+    void finishCirculationAction(const lib::Result &result);
+    lib::OperatorContext operatorContext() const;
+    int findReaderId(const QString &readerNo, QString *error) const;
 
     AuthService m_authService;
     BookService m_bookService;
@@ -87,6 +95,7 @@ private:
     QLineEdit *m_borrowReaderNo = nullptr;
     QComboBox *m_borrowCopy = nullptr;
     QTableWidget *m_activeLoansTable = nullptr;
+    QTableWidget *m_reservationsTable = nullptr;
 
     QLineEdit *m_readerNo = nullptr;
     QLineEdit *m_readerName = nullptr;

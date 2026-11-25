@@ -2,8 +2,8 @@
 
 #include "authservice.h"
 #include "permissionservice.h"
-#include "../common/database.h"
-#include "../common/operationlogservice.h"
+#include "../system/operationlogservice.h"
+#include "common/database.h"
 
 #include <QCryptographicHash>
 #include <QDebug>

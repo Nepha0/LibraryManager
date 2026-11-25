@@ -2,7 +2,7 @@
 
 #include "../auth/authservice.h"
 #include "../auth/permissionservice.h"
-#include "database.h"
+#include "common/database.h"
 
 #include <QDebug>
 #include <QSqlError>

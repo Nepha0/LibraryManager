@@ -1,7 +1,7 @@
 #include "permissionservice.h"
 
 #include "authservice.h"
-#include "../common/database.h"
+#include "common/database.h"
 
 #include <QSqlQuery>
 #include <QVariant>

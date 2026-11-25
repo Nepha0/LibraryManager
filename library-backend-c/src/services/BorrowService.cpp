@@ -10,7 +10,8 @@ BorrowService::BorrowService(QSqlDatabase db, CopyService* copies, EligibilityFn
     : m_db(db), m_copies(copies), m_eligibility(std::move(eligibility)) {}
 
 // ===================== 借阅 =====================
-Result BorrowService::borrow(const OperatorContext& op, qint64 readerId, const QString& copyBarcode)
+Result BorrowService::borrow(const OperatorContext& op, qint64 readerId, const QString& copyBarcode,
+                             const LoanAuditFn& audit)
 {
     // 1) 操作者校验
     if (!op.authenticated)
@@ -128,6 +129,10 @@ Result BorrowService::borrow(const OperatorContext& op, qint64 readerId, const Q
             return rollbackFail(ErrorCodeC::IllegalReservationTransition,
                                 QStringLiteral("待取预约状态已变化，借阅已回滚"));
     }
+
+    QString auditError;
+    if (audit && !audit(loanId, &auditError))
+        return rollbackFail(ErrorCode::DbError, auditError);
 
     // 9) 提交
     if (!m_db.commit())

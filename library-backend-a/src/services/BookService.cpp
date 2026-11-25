@@ -261,7 +261,7 @@ Result BookService::listBooks(const OperatorContext& op, const QVariantMap& filt
     const QString keyword = filter.value(QStringLiteral("keyword")).toString().trimmed();
     if (!keyword.isEmpty()) {
         where << QStringLiteral("(b.title LIKE ? OR b.author LIKE ? OR b.isbn LIKE ?)");
-        const QString like = QStringLiteral("%1%").arg(keyword);
+        const QString like = QStringLiteral("%%1%").arg(keyword);
         binds << like << like << like;
     }
     if (filter.contains(QStringLiteral("category_id")) && !filter.value(QStringLiteral("category_id")).isNull()) {

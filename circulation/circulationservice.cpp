@@ -1,9 +1,9 @@
 #include "circulationservice.h"
 
 #include "../common/database.h"
-#include "../common/operationlogservice.h"
-#include "../common/paramservice.h"
-#include "../readers/readerservice.h"
+#include "../library-backend-b/src/readers/readerservice.h"
+#include "../library-backend-b/src/system/operationlogservice.h"
+#include "../library-backend-b/src/system/paramservice.h"
 
 #include <QDateTime>
 #include <QSqlDatabase>

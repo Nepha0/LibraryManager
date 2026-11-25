@@ -1,6 +1,6 @@
 #include "authservice.h"
 
-#include "../common/database.h"
+#include "common/database.h"
 
 #include <QCryptographicHash>
 #include <QDebug>

@@ -2,6 +2,8 @@
 
 本文档说明后端 B 已实现的数据库结构、Service 接口、权限规则、运行配置、测试方法和待联调事项。
 
+`src/` 下是后端 B 的源码，`tests/` 下是 MySQL 冒烟测试。主程序和测试通过 `backend-b.pri` 共用源码清单。下文源码路径相对于本目录，数据库迁移和初始化命令以仓库根目录为基准。
+
 ## 1. 负责范围
 
 后端 B 负责：
@@ -41,7 +43,7 @@
 
 Qt 通过 `QODBC` 和 64 位用户或系统 DSN 连接 MySQL。DSN 指向 `library_manager`，Qt 套件需提供 `qsqlodbc.dll`。程序默认查找 `LibraryManagerDSN`；本机已配置的是 `library_data`，可通过 `LIBRARYMANAGER_DSN` 环境变量指定。
 
-在项目根目录运行 `.\scripts\init-mysql.ps1 -Dsn library_data`。脚本依次运行 `001_backend_b.sql` 和 `002_demo_catalog.sql`，补齐馆藏和借还所需的表，并导入虚构演示数据。
+在项目根目录运行 `.\scripts\init-mysql.ps1 -Dsn library_data`。脚本按顺序执行 `001_backend_b.sql`、`002_demo_catalog.sql` 和 `003_unified_schema_v1.sql`，再导入 `database/seeds/demo_catalog.sql` 中的虚构书目。
 
 若 DSN 已提供登录信息，应用无需额外的账号环境变量。需要覆盖时，在启动环境中设置 `LIBRARYMANAGER_DB_USER` 和 `LIBRARYMANAGER_DB_PASSWORD`。数据库凭据不提交到仓库。
 
@@ -51,8 +53,8 @@ Qt 通过 `QODBC` 和 64 位用户或系统 DSN 连接 MySQL。DSN 指向 `libra
 
 文件：
 
-    auth/authservice.h
-    auth/authservice.cpp
+    src/auth/authservice.h
+    src/auth/authservice.cpp
 
 已实现：
 
@@ -76,8 +78,8 @@ Qt 通过 `QODBC` 和 64 位用户或系统 DSN 连接 MySQL。DSN 指向 `libra
 
 文件：
 
-    auth/permissionservice.h
-    auth/permissionservice.cpp
+    src/auth/permissionservice.h
+    src/auth/permissionservice.cpp
 
 已实现：
 
@@ -123,8 +125,8 @@ Qt 通过 `QODBC` 和 64 位用户或系统 DSN 连接 MySQL。DSN 指向 `libra
 
 文件：
 
-    common/paramservice.h
-    common/paramservice.cpp
+    src/system/paramservice.h
+    src/system/paramservice.cpp
 
 已实现：
 
@@ -153,8 +155,8 @@ Qt 通过 `QODBC` 和 64 位用户或系统 DSN 连接 MySQL。DSN 指向 `libra
 
 文件：
 
-    common/operationlogservice.h
-    common/operationlogservice.cpp
+    src/system/operationlogservice.h
+    src/system/operationlogservice.cpp
 
 已实现：
 
@@ -182,8 +184,8 @@ Qt 通过 `QODBC` 和 64 位用户或系统 DSN 连接 MySQL。DSN 指向 `libra
 
 文件：
 
-    auth/userservice.h
-    auth/userservice.cpp
+    src/auth/userservice.h
+    src/auth/userservice.cpp
 
 已实现：
 
@@ -220,8 +222,8 @@ Qt 通过 `QODBC` 和 64 位用户或系统 DSN 连接 MySQL。DSN 指向 `libra
 
 文件：
 
-    readers/readerservice.h
-    readers/readerservice.cpp
+    src/readers/readerservice.h
+    src/readers/readerservice.cpp
 
 接口：
 
@@ -278,13 +280,13 @@ Qt 通过 `QODBC` 和 64 位用户或系统 DSN 连接 MySQL。DSN 指向 `libra
 
 测试项目：
 
-    tests/backend_b_smoke/backend_b_smoke.pro
+    library-backend-b.pro
 
 测试使用独立 Qt Console Application，不依赖主界面。
 
 Qt Creator 运行方法：
 
-1. 打开 `backend_b_smoke.pro`。
+1. 打开 `library-backend-b.pro`。
 2. 选择 `Desktop Qt 6.12.0 MinGW 64-bit` Kit。
 3. 在项目根目录运行 `.\scripts\init-mysql.ps1 -Dsn library_data -Smoke`，然后在 Qt Creator 运行环境中设置 `LIBRARYMANAGER_DSN=library_data`。测试只访问 `library_manager_smoke`。
 4. 执行 qmake。

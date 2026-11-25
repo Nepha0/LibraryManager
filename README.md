@@ -1,7 +1,7 @@
 # LibraryManager 图书管理系统
 
 四人课程项目。技术方案：C++17、Qt 6 Widgets、Qt SQL、MySQL 8（通过 ODBC）；使用 qmake 构建。
-当前提供可运行的课程演示版，已经串通登录、馆藏入库、借书、还书、读者登记、
+当前提供可运行的课程演示版，已经串通登录、馆藏入库、借书、还书、续借、预约、读者登记、
 统计查看和 CSV 导出。
 
 ## 第一次运行
@@ -26,12 +26,15 @@ MSVC 套件需要对应的开发者命令行与 nmake/jom，不能混用 MinGW �
 
 ## 演示流程
 
+演示馆藏覆盖中英文、同名不同版本、未入藏、维修、遗失、下架以及缺少出版信息等情况。可以用 `雾港来信` 检查同名检索，用 `DEMO-CATALOG-002` 找到只有一册可借的书目来演示预约。
+
 1. 使用演示账号登录，查看工作台统计。
 2. 在“图书与库存”新增一本书，设置复本数。
 3. 在“读者管理”登记读者，或使用预置读者 `R001`。
 4. 在“借还管理”选择读者和实体册办理借阅。
-5. 选择当前借阅记录并归还。
-6. 在“统计报表”查看借阅流水并导出 CSV。
+5. 把某本书的复本全部借出后，在“图书与库存”选中书目，为另一位读者办理预约。
+6. 归还其中一册，在“预约管理”查看预约转为待取书，也可以取消所选预约。
+7. 在“统计报表”查看借阅流水并导出 CSV。
 
 自动业务测试：
 
@@ -51,13 +54,14 @@ $p.ExitCode
 ```text
 LibraryManager/
 ├── LibraryManager.pro     qmake 工程，A 协调维护
-├── app/                   A：入口、主窗口、导航
-├── common/                A：连接、公共类型与工具
-├── auth/                  A：登录、身份和权限
-├── books/                 B：书目、分类、实体书
-├── circulation/           C：借还、续借、预约与事务
-├── readers/               D：读者资料、类别及个人中心
-├── statistics/            D：统计、CSV 导出
+├── app/                   程序入口、导航和各业务页面
+├── common/                主程序与后端 B 共用的 MySQL 连接
+├── library-backend-a/     图书、馆藏、检索与导入导出
+├── library-backend-b/     登录、权限、读者、系统参数与日志
+├── library-backend-c/     借还、续借、预约与逾期服务
+├── books/                 主程序当前使用的图书与库存服务
+├── circulation/           主程序当前使用的基本借还服务
+├── statistics/            主程序的统计与 CSV 导出
 ├── database/
 │   ├── migrations/        版本化建表与升级 SQL
 │   └── seeds/             可公开的虚构演示数据
@@ -78,6 +82,7 @@ Git 不保存空目录，因此保留 `.gitkeep`；添加真实文件后可删�
 - [Git 协作操作指南](docs/GIT_WORKFLOW.md)
 - [分工与交付约定](docs/TEAM.md)
 - [数据库与接口约定](docs/ARCHITECTURE.md)
+- [后端 B 接口与测试](library-backend-b/README.md)
 - [阶段计划](docs/ROADMAP.md)
 - [手工验收表](tests/ACCEPTANCE.md)
 

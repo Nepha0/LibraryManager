@@ -34,9 +34,15 @@ try {
         }
         $command.CommandText = "SET SESSION character_set_client = 'utf8mb4', character_set_connection = 'utf8mb4'"
         [void]$command.ExecuteNonQuery()
-        $directory = Join-Path (Split-Path -Parent $PSScriptRoot) 'database/migrations/mysql'
-        foreach ($name in @('001_backend_b.sql', '002_demo_catalog.sql', '003_unified_schema_v1.sql')) {
-            $content = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $directory $name)
+        $databaseDirectory = Join-Path (Split-Path -Parent $PSScriptRoot) 'database'
+        $files = @(
+            'migrations/mysql/001_backend_b.sql'
+            'migrations/mysql/002_demo_catalog.sql'
+            'migrations/mysql/003_unified_schema_v1.sql'
+            'seeds/demo_catalog.sql'
+        )
+        foreach ($file in $files) {
+            $content = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $databaseDirectory $file)
             $content = $content -replace '(?m)^\s*--[^\r\n]*', ''
             foreach ($statement in ($content -split '(?m);[ \t]*\r?$')) {
                 if ([string]::IsNullOrWhiteSpace($statement)) { continue }
@@ -73,7 +79,7 @@ try {
                     [void]$command.ExecuteNonQuery()
                 }
             }
-            Write-Host "Applied $name to $database"
+            Write-Host "Applied $file to $database"
         }
     }
     finally { $command.Dispose() }

@@ -1,8 +1,8 @@
 #include "readerservice.h"
 
-#include "../common/database.h"
-#include "../common/operationlogservice.h"
-#include "../common/paramservice.h"
+#include "../system/operationlogservice.h"
+#include "../system/paramservice.h"
+#include "common/database.h"
 
 #include <QSqlDatabase>
 #include <QSqlError>

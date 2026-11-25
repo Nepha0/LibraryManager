@@ -1,12 +1,12 @@
-#include "auth/authservice.h"
-#include "auth/permissionservice.h"
 #include "books/bookservice.h"
 #include "circulation/circulationservice.h"
 #include "common/database.h"
-#include "common/paramservice.h"
-#include "common/operationlogservice.h"
-#include "auth/userservice.h"
-#include "readers/readerservice.h"
+#include "library-backend-b/src/auth/authservice.h"
+#include "library-backend-b/src/auth/permissionservice.h"
+#include "library-backend-b/src/auth/userservice.h"
+#include "library-backend-b/src/readers/readerservice.h"
+#include "library-backend-b/src/system/operationlogservice.h"
+#include "library-backend-b/src/system/paramservice.h"
 #include "statistics/statisticsservice.h"
 
 #include <QCoreApplication>

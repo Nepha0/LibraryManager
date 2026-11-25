@@ -215,7 +215,7 @@ Result CopyService::changeCopyStatus(const OperatorContext& op, qint64 copyId, c
     // 4) 乐观锁更新：WHERE 带上当前状态，防止并发下状态漂移
     QSqlQuery q(m_db);
     q.prepare(QStringLiteral("UPDATE book_copies SET status = ?, updated_at = ")
-                  + DatabaseManager::instance().nowExpr()
+                  + DatabaseManager::nowExpr(m_db)
                   + QStringLiteral(" WHERE id = ? AND status = ?"));
     q.addBindValue(toName);
     q.addBindValue(copyId);

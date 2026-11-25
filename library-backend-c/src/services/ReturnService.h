@@ -25,7 +25,8 @@ public:
     ReturnService(QSqlDatabase db, CopyService* copies);
 
     // locator: {"loan_id": qint64} 或 {"copy_barcode": QString}
-    Result returnBook(const OperatorContext& op, const QVariantMap& locator);
+    Result returnBook(const OperatorContext& op, const QVariantMap& locator,
+                      const LoanAuditFn& audit = {});
     // → data: { loan_id, returned_at, overdue_days, reservation_triggered, copy_status("available"|"reserved") }
 
 private:

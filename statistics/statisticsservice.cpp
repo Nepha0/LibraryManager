@@ -1,6 +1,6 @@
 #include "statisticsservice.h"
 
-#include "../auth/permissionservice.h"
+#include "../library-backend-b/src/auth/permissionservice.h"
 #include "../common/database.h"
 
 #include <QDateTime>

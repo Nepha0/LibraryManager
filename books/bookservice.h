@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../auth/authservice.h"
+#include "../library-backend-b/src/auth/authservice.h"
 
 #include <QString>
 #include <QStringList>
