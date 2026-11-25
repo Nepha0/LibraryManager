@@ -4,7 +4,7 @@
  * search_core.h —— SearchService / AdvancedSearchService 共用的图书行构造器。
  * 每行附带：可借数量、馆藏总数、馆藏位置（去重）。
  */
-#include "../common/contract.h"
+#include "common/contract.h"
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlError>

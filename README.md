@@ -82,6 +82,8 @@ Git 不保存空目录，因此保留 `.gitkeep`；添加真实文件后可删�
 - [Git 协作操作指南](docs/GIT_WORKFLOW.md)
 - [分工与交付约定](docs/TEAM.md)
 - [数据库与接口约定](docs/ARCHITECTURE.md)
+- [接口契约](docs/接口契约.md)
+- [统一 MySQL DDL](docs/统一MySQL-DDL.md)
 - [后端 B 接口与测试](library-backend-b/README.md)
 - [阶段计划](docs/ROADMAP.md)
 - [手工验收表](tests/ACCEPTANCE.md)

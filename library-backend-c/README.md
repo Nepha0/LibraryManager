@@ -1,6 +1,6 @@
 # 后端C：借阅流通、预约、逾期与推荐业务
 
-> 负责人：C。契约基线：`docs/接口契约-C.md`（与 `library-backend-a/docs/接口契约.md`、
+> 负责人：C。契约基线：`docs/接口契约-C.md`（与 [统一接口契约](../docs/接口契约.md)、
 > 飞书工作清单第六节「接口统一」对齐）。
 
 ## 当前进度
@@ -46,5 +46,5 @@ cd tests && nmake && .\backend_c_tests.exe
    的接入点——B 现为 `UserSession + bool` 风格，需 B 迁移到统一基线或提供适配函数。
 2. **A 板块调用**：副本状态变更只走 `CopyService::changeCopyStatus`；C 侧无任何
    直接 UPDATE `book_copies` 的语句。
-3. **表**：`loans` / `reservations` 以定稿的 `library-backend-a/docs/统一MySQL-DDL.md`（V1.1）
+3. **表**：`loans` / `reservations` 以定稿的 [统一 MySQL DDL](../docs/统一MySQL-DDL.md)（V1.1）
    为唯一事实来源；`003_unified_schema_v1.sql` 仅用于旧库升级（C 牵头，已评审）。

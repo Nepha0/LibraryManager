@@ -8,7 +8,6 @@
 library-backend-a/
 ├── library-backend-a.pro     # 顶层 qmake 工程（subdirs: src / demo / tests）
 ├── src/                      # 核心静态库 backenda
-│   ├── common/contract.h     # 统一 Result / 错误码 / 状态枚举（阶段0 契约）
 │   ├── database/             # DatabaseManager + 内嵌 9 表 SCHEMA_SQL
 │   ├── services/             # 六个 Service（状态机唯一转换源在 CopyService）
 │   └── src.pro
@@ -16,7 +15,6 @@ library-backend-a/
 ├── demo/                     # 控制台演示程序
 ├── gui/                      # Qt Widgets GUI 演示窗口（可视化验收：列表/检索/新增/下架/副本状态机/导入导出）
 ├── tests/                    # QTest 测试套件（23 个用例函数）
-├── docs/                     # 接口契约.md / 统一MySQL-DDL.md
 └── reports/                  # 测试报告 / 验收报告
 ```
 
@@ -41,7 +39,9 @@ Qt Creator 打开 `library-backend-a.pro` 直接构建即可。
 
 ## 快速对接
 
-- 接口契约（B/C/F 与 A 端必须一致的接触点，定稿基线）：`docs/接口契约.md`
+- 共享的 Result、错误码和状态枚举定义见 [common/contract.h](../common/contract.h)。
+
+- 接口契约（B/C/F 与 A 端必须一致的接触点，定稿基线）：[接口契约.md](../docs/接口契约.md)
   **注意：本文为团队评审后的定稿基线，改动需当天通知全员（对齐要求见契约文档开头）。**
-- 数据库表结构（9 表 DDL，统一 V1.1）：`docs/统一MySQL-DDL.md`
+- 数据库表结构（9 表 DDL，统一 V1.1）：[统一MySQL-DDL.md](../docs/统一MySQL-DDL.md)
 - 副本状态机：`AVAILABLE ↔ BORROWED / RESERVED / MAINTENANCE / LOST`，唯一合法转换源在 `CopyService::changeCopyStatus`，C 板块借还/预约流程通过该接口驱动。

@@ -9,7 +9,7 @@
  *  - 排序支持：书名(title) / 出版时间(publish_date) / 可借数(available)
  *  - 空条件返回空结果而非全量；条件全部非法返回明确提示
  */
-#include "../common/contract.h"
+#include "common/contract.h"
 #include <QSqlDatabase>
 
 namespace lib {

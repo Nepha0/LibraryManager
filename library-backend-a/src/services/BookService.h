@@ -7,7 +7,7 @@
  *  - ISBN 唯一校验（业务层，ACTIVE 范围内唯一；下架书视为逻辑删除，允许重新录入同 ISBN）
  *  - 物理删除接口对有借阅记录的图书返回拒绝并提示改用下架（逻辑删除）
  */
-#include "../common/contract.h"
+#include "common/contract.h"
 #include <QSqlDatabase>
 
 namespace lib {

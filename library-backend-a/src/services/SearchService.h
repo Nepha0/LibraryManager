@@ -7,7 +7,7 @@
  *  - 结果附带各图书可借数量与馆藏位置
  *  - 空关键词返回空结果而非全量
  */
-#include "../common/contract.h"
+#include "common/contract.h"
 #include <QSqlDatabase>
 
 namespace lib {

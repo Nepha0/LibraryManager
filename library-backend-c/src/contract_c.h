@@ -3,7 +3,7 @@
 /*
  * contract_c.h —— 后端C 统一数据契约扩展（借阅流通/预约/逾期/推荐）
  *
- * 依赖并复用 A 端 contract.h（Result / OperatorContext / 错误码 1000~1999 / 状态枚举）。
+ * 依赖并复用共享的 common/contract.h（Result / OperatorContext / 错误码 1000~1999 / 状态枚举）。
  * 本文件只补充 C 自有内容：
  *  - 错误码 3000~3999 段（见 library-backend-c/docs/接口契约-C.md §1，新增须登记）
  *  - 预约状态枚举辅助（与统一 MySQL DDL 的 ENUM 字面量一致，小写）
