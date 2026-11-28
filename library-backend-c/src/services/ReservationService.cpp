@@ -224,6 +224,12 @@ Result ReservationService::promoteNext(const OperatorContext& op, qint64 bookId)
         return Result::fail(toErrorCode(c), msg);
     };
 
+    // 惰性释放之后的失败路径：释放结果已成立，须提交持久化（随事务回滚会丢失超时失效）
+    auto commitFail = [this](auto c, const QString& msg) {
+        m_db.commit();
+        return Result::fail(toErrorCode(c), msg);
+    };
+
     // 0) 先惰性释放该书已超时的待取预约（超时失效 → 副本回馆）
     Result rel = releaseExpiredReadyToPick(op, bookId);
     if (!rel.ok()) return rollbackFail(rel.code, rel.message);
@@ -236,7 +242,7 @@ Result ReservationService::promoteNext(const OperatorContext& op, qint64 bookId)
     if (!q.exec())
         return rollbackFail(ErrorCode::DbError, QStringLiteral("查询排队队列失败: %1").arg(q.lastError().text()));
     if (!q.next())
-        return rollbackFail(ErrorCodeC::NoQueueToPromote, QStringLiteral("该书无排队中的预约可处理"));
+        return commitFail(ErrorCodeC::NoQueueToPromote, QStringLiteral("该书无排队中的预约可处理"));
     const qint64 resvId = q.value(0).toLongLong();
     const qint64 readerId = q.value(1).toLongLong();
 
@@ -246,7 +252,7 @@ Result ReservationService::promoteNext(const OperatorContext& op, qint64 bookId)
                              "ORDER BY id LIMIT 1"));
     c.addBindValue(bookId);
     if (!c.exec() || !c.next())
-        return rollbackFail(ErrorCodeC::CopyNotAvailable, QStringLiteral("该书当前无在馆可借副本，无法转待取"));
+        return commitFail(ErrorCodeC::CopyNotAvailable, QStringLiteral("该书当前无在馆可借副本，无法转待取"));
     const qint64 copyId = c.value(0).toLongLong();
     Result cs = m_copies->changeCopyStatus(op, copyId, QStringLiteral("reserved"));
     if (!cs.ok()) return rollbackFail(cs.code, cs.message);
