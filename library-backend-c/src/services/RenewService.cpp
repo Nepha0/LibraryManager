@@ -1,5 +1,8 @@
 #include "RenewService.h"
 
+#include "services/CopyService.h"        // 惰性清理用（A 端状态机）
+#include "services/ReservationService.h" // 续借入口惰性释放超时待取
+
 #include <QSqlError>
 
 namespace lib {
@@ -39,6 +42,15 @@ Result RenewService::renew(const OperatorContext& op, qint64 loanId)
     if (op.role == Role::Reader
         && (!readerUserId.isValid() || readerUserId.toLongLong() != op.userId))
         return Result::fail(ErrorCode::NoPermission, QStringLiteral("无权限：读者仅可续借本人借阅记录"));
+
+    // 3.5) 惰性清理（仅 staff 办理时触发）：该书"超时待取释放 + 队首顺延"，避免已超时的
+    //      ready_to_pick 预约永久卡住续借。promoteNext 自带事务，须在续借事务开启前调用；
+    //      尽力而为，失败（无排队/无副本/状态竞争）忽略，不影响续借主流程。
+    if (op.isStaff()) {
+        CopyService copies(m_db);
+        ReservationService resv(m_db, &copies, m_eligibility);
+        resv.promoteNext(op, bookId);
+    }
 
     // 4) 五条规则逐条检查，全部不通过原因一次性返回（3004）
     QStringList reasons;

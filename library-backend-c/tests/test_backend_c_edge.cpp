@@ -279,27 +279,36 @@ void scenarioPickupEdge()
     expect(codeOf(borrow.borrow(r1op, f.r1, QStringLiteral("C001"))) == (int)lib::ErrorCode::NoPermission,
            "Reader 角色办理借阅 → 1002（借阅仅 staff 可办理）");
 
-    // 超时后取书 → 3002（截止时间已过）
+    // 超时后：借阅入口惰性释放（修复①）——持有人本人来借，先释放自己的超时预约再正常借出
     QSqlQuery q(db);
     q.exec(QStringLiteral("UPDATE reservations SET pickup_deadline=datetime('now','localtime','-1 day') "
                           "WHERE status='ready_to_pick'"));
-    expect(isC(borrow.borrow(staff, f.r3, QStringLiteral("C001")), 3002),
-           "待取超时后取书 → 3002（截止已过）");
-
-    // 惰性释放（promoteNext 触发）→ 预约 expired、副本回馆
-    // 队列为空时 promoteNext 返回 3009，但超时释放结果须持久化（不再随事务回滚）
-    lib::Result pr = resv.promoteNext(staff, f.bookA);
-    expect(isC(pr, 3009), "超时且队列空 → 3009（无待顺延者）");
-    expect(scalar(db, QStringLiteral("SELECT status FROM book_copies WHERE copy_code='C001'"))
-               .toString() == QStringLiteral("available"), "超时释放已持久化：C001 → available");
-    expect(scalar(db, QStringLiteral("SELECT status FROM book_copies WHERE copy_code='C001'"))
-               .toString() == QStringLiteral("available"), "超时释放后 C001 → available");
+    lib::Result selfTake = borrow.borrow(staff, f.r3, QStringLiteral("C001"));
+    expect(selfTake.ok(), "待取超时后本人来借 → 借阅入口惰性释放并正常借出");
     expect(scalar(db, QStringLiteral("SELECT status FROM reservations WHERE reader_id=%1 AND book_id=%2")
                        .arg(f.r3).arg(f.bookA)).toString() == QStringLiteral("expired"),
-           "超时待取预约 → expired");
-    // 失效后原预约者走正常借阅
-    lib::Result again = borrow.borrow(staff, f.r3, QStringLiteral("C001"));
-    expect(again.ok(), "超时失效后原预约者可正常借出");
+           "超时待取预约 → expired（借阅入口触发）");
+    expect(scalar(db, QStringLiteral("SELECT status FROM book_copies WHERE copy_code='C001'"))
+               .toString() == QStringLiteral("borrowed"), "C001 已借出");
+
+    // 非持有人借阅同样触发惰性释放：其他读者的超时待取不再卡住借阅
+    expect(ret.returnBook(staff, {{QStringLiteral("copy_barcode"), QStringLiteral("C002")}}).ok(),
+           "夹具：归还 C002（无排队 → 回馆）");
+    q.exec(QStringLiteral("INSERT INTO reservations(book_id, reader_id, queue_no, status, requested_at) "
+                          "VALUES(%1,%2,1,'waiting',datetime('now','localtime'))").arg(f.bookA).arg(f.r1));
+    expect(ret.returnBook(staff, {{QStringLiteral("copy_barcode"), QStringLiteral("C003")}}).ok(),
+           "夹具：归还 C003 触发 R001 待取");
+    q.exec(QStringLiteral("UPDATE reservations SET pickup_deadline=datetime('now','localtime','-1 day') "
+                          "WHERE reader_id=%1 AND status='ready_to_pick'").arg(f.r1));
+    lib::Result otherTake = borrow.borrow(staff, f.r2, QStringLiteral("C003"));
+    expect(otherTake.ok(), "其他读者借阅 → 惰性释放超时待取后可借出");
+    expect(scalar(db, QStringLiteral("SELECT status FROM reservations WHERE reader_id=%1").arg(f.r1))
+               .toString() == QStringLiteral("expired"), "R001 超时待取 → expired");
+    expect(scalar(db, QStringLiteral("SELECT status FROM book_copies WHERE copy_code='C003'"))
+               .toString() == QStringLiteral("borrowed"), "C003 已被 R002 借出");
+
+    // 队列已空：promoteNext → 3009（无待顺延者）
+    expect(isC(resv.promoteNext(staff, f.bookA), 3009), "无排队时顺延 → 3009");
 
     // reserved 但无 ready_to_pick 预约（手工构造孤儿 reserved）→ 3002
     insertLoan(f, f.r3, copyIdOf(f, "C002"), f.bookA, 0, 30, QStringLiteral("borrowed"));
@@ -347,8 +356,8 @@ void scenarioReturnEdge()
     lib::Result gl = bs.getLoan(staff, late);
     expect(gl.ok() && gl.data.value(QStringLiteral("status_text")).toString() == QStringLiteral("已还"),
            "历史逾期记录 getLoan → 已还");
-    if (gl.ok() && gl.data.value(QStringLiteral("overdue_days")).toInt() == 0)
-        observe("借阅行 overdue_days 对已还记录恒为 0（历史逾期天数仅在 OverdueService mode=all）——口径确认项");
+    expect(gl.ok() && gl.data.value(QStringLiteral("overdue_days")).toInt() == 5,
+           "已还记录 overdue_days = 5（借阅行口径锁定：归还日-应还日）");
 
     // 多人排队：队首按 requested_at（R002 早于 R003）
     insertLoan(f, f.r3, copyIdOf(f, "C003"), f.bookA, 0, 30, QStringLiteral("borrowed"));
@@ -408,8 +417,10 @@ void scenarioRenewEdge()
     q.exec(QStringLiteral("UPDATE loans SET returned_at=date('now','localtime','-1 day') WHERE id=%1").arg(done));
     expect(isC(renew.renew(staff, done), 3004), "已归还记录续借 → 3004（已归还原因）");
 
-    // 排队冲突：其他读者 waiting → 3004；只剩自己的排队 → 排除本人后可续
+    // 排队冲突：其他读者 waiting → 3004；删除后可续
+    // （loan3 提前借出 C004：确保续借入口惰性顺延无副本可占，不干扰本组用例）
     qint64 loan2 = insertLoan(f, f.r1, copyIdOf(f, "C003"), f.bookA, 0, 30, QStringLiteral("borrowed"));
+    qint64 loan3 = insertLoan(f, f.r1, copyIdOf(f, "C004"), f.bookA, 0, 30, QStringLiteral("borrowed"));
     q.exec(QStringLiteral("INSERT INTO reservations(book_id, reader_id, queue_no, status, requested_at) "
                           "VALUES(%1,%2,1,'waiting',datetime('now','localtime'))").arg(f.bookA).arg(f.r2));
     lib::Result blocked = renew.renew(staff, loan2);
@@ -418,17 +429,26 @@ void scenarioRenewEdge()
     q.exec(QStringLiteral("DELETE FROM reservations WHERE reader_id=%1").arg(f.r2));
     expect(renew.renew(staff, loan2).ok(), "排队者=本人 → 排除本人后可续借");
 
-    // 其他读者 ready_to_pick（含已超时的待取）→ 拒（惰性释放前的窗口期）
+    // 其他读者 ready_to_pick → 3004（真实流程构造：R003 排队 → 归还逾期件触发待取）
     lib::ReservationService resv(db, &copies, okElig());
-    q.exec(QStringLiteral("INSERT INTO reservations(book_id, reader_id, queue_no, status, requested_at, pickup_deadline) "
-                          "VALUES(%1,%2,2,'ready_to_pick',datetime('now','localtime'),datetime('now','localtime','+1 day'))")
-               .arg(f.bookA).arg(f.r3));
+    lib::ReturnService ret(db, &copies);
+    lib::Result rs = resv.reserve(staff, f.r3, f.bookA);   // C001-C004 全借出 → 可排队
+    expect(rs.ok(), "夹具：R003 排队");
+    expect(ret.returnBook(staff, {{QStringLiteral("loan_id"), od}}).ok(), "夹具：归还逾期件触发待取");
+    expect(scalar(db, QStringLiteral("SELECT status FROM book_copies WHERE copy_code='C002'"))
+               .toString() == QStringLiteral("reserved"), "夹具：C002 → reserved（R003 待取）");
     expect(isC(renew.renew(staff, loan2), 3004), "其他读者 ready_to_pick → 3004");
+
+    // 待取超时后：续借入口惰性释放（修复①），超时待取不再永久卡住续借
     q.exec(QStringLiteral("UPDATE reservations SET pickup_deadline=datetime('now','localtime','-1 day') "
                           "WHERE reader_id=%1 AND status='ready_to_pick'").arg(f.r3));
-    lib::Result expiredBlock = renew.renew(staff, loan2);
-    if (isC(expiredBlock, 3004))
-        observe("其他读者待取已超时（未惰性释放）时续借仍被拒——待取超时依赖惰性释放，口径确认项");
+    lib::Result afterRelease = renew.renew(staff, loan2);
+    expect(afterRelease.ok(), "待取超时后续借 → 惰性释放后可续借");
+    expect(scalar(db, QStringLiteral("SELECT status FROM reservations WHERE reader_id=%1 AND book_id=%2")
+                       .arg(f.r3).arg(f.bookA)).toString() == QStringLiteral("expired"),
+           "超时待取预约 → expired（续借入口触发）");
+    expect(scalar(db, QStringLiteral("SELECT status FROM book_copies WHERE copy_code='C002'"))
+               .toString() == QStringLiteral("available"), "超时释放副本回馆");
 
     // 账号异常（资格出口 accountProblem）→ 3004
     lib::EligibilityFn badAcct = [](qint64) {
@@ -437,9 +457,8 @@ void scenarioRenewEdge()
     lib::RenewService renewBad(db, badAcct);
     expect(isC(renewBad.renew(staff, loan2), 3004), "账号异常 → 3004");
 
-    // max_renew_times=0 → 全部拒绝
+    // max_renew_times=0 → 全部拒绝（loan3 已在前方夹具中借出）
     q.exec(QStringLiteral("UPDATE system_params SET param_value='0' WHERE param_key='max_renew_times'"));
-    qint64 loan3 = insertLoan(f, f.r1, copyIdOf(f, "C004"), f.bookA, 0, 30, QStringLiteral("borrowed"));
     expect(isC(renew.renew(staff, loan3), 3004), "max_renew_times=0 → 续借全部拒绝（边界）");
     q.exec(QStringLiteral("UPDATE system_params SET param_value='2' WHERE param_key='max_renew_times'"));
 }
@@ -668,12 +687,11 @@ void scenarioOverdueEdge()
                                                    {QStringLiteral("reader_id"), f.r1}});
     expect(mine.ok() && mine.total == 1, "按读者筛选逾期 → 1 条");
 
-    // 未知 mode（实现按 else 走 all 口径，观察确认）
+    // 非法 mode → 参数校验拒绝（口径锁定：不走 all 兜底）
     lib::Result badMode = overdue.listOverdue(staff, {{QStringLiteral("mode"), QStringLiteral("bogus")}});
-    if (badMode.ok() && badMode.total == 2)
-        observe("listOverdue 未知 mode 落入 all 口径（未拒绝）——建议校验 mode 参数");
-    else
-        expect(badMode.code == lib::ErrorCode::InvalidCondition || !badMode.ok(), "非法 mode 被拒绝或非 all 口径");
+    expect(badMode.code == lib::ErrorCode::InvalidCondition, "非法 mode → InvalidCondition 拒绝");
+    lib::Result defMode = overdue.listOverdue(staff, {});
+    expect(defMode.ok() && defMode.total == 1, "缺省 mode=current：仅 1 条在借逾期");
 }
 
 // ============ 9) 个人中心与查询筛选 ============
@@ -739,12 +757,17 @@ void scenarioPersonalQueryEdge()
     lib::Result pg2 = borrow.listLoans(staff, {}, 2, 10);
     expect(pg2.ok() && pg2.list.isEmpty() && pg2.total == 2, "越界页返回空列表但 total 正确");
 
-    // 观察项：Reader 是否可无范围查看全部借阅记录（当前实现无 Reader 范围限制）
+    // 修复②：Reader 查询强制限定本人范围（忽略传入的 reader_id 越权筛选）
     lib::Result readerList = borrow.listLoans(r1op, {}, 1, 10);
-    if (readerList.ok())
-        observe("listLoans 对 Reader 无本人范围限制（当前返回全馆记录）——接口权限口径确认项");
-    else
-        expect(codeOf(readerList) == (int)lib::ErrorCode::NoPermission, "Reader 无范围查询被拒 → 1002");
+    expect(readerList.ok() && readerList.total == 2,
+           "Reader 查询自动限定本人（在借1+历史1 = 2 条）");
+    bool allMine = true;
+    for (const QVariant& v : readerList.list)
+        if (v.toMap().value(QStringLiteral("reader_id")).toLongLong() != f.r1) allMine = false;
+    expect(readerList.ok() && allMine, "Reader 查询结果全部为本人记录");
+    lib::Result otherList = borrow.listLoans(r1op, {{QStringLiteral("reader_id"), f.r2}}, 1, 10);
+    expect(otherList.ok() && otherList.total == 0,
+           "Reader 传他人 reader_id 仍被限定为本人（0 条）");
 }
 
 } // namespace

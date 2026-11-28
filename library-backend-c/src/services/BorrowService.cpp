@@ -1,6 +1,7 @@
 #include "BorrowService.h"
 
-#include "services/CopyService.h"   // A 端 CopyService（INCLUDEPATH 含 library-backend-a/src）
+#include "services/CopyService.h"        // A 端 CopyService（INCLUDEPATH 含 library-backend-a/src）
+#include "services/ReservationService.h" // 借阅入口惰性释放超时待取
 
 #include <QSqlError>
 
@@ -40,10 +41,25 @@ Result BorrowService::borrow(const OperatorContext& op, qint64 readerId, const Q
     Result cr = m_copies->getCopyByBarcode(op, barcode);
     if (!cr.ok())
         return cr;   // 1011 CopyNotFound 原样透出
-    const QVariantMap copy = cr.data;
-    const QString copyStatus = copy.value(QStringLiteral("status")).toString().toLower();
-    if (copy.value(QStringLiteral("book_status")).toString().toLower() == QStringLiteral("shelved_off"))
+    const QVariantMap copy0 = cr.data;
+    QVariantMap copy = copy0;
+    const QString copyStatus0 = copy0.value(QStringLiteral("status")).toString().toLower();
+    if (copy0.value(QStringLiteral("book_status")).toString().toLower() == QStringLiteral("shelved_off"))
         return Result::fail(ErrorCode::BookShelvedOff, QStringLiteral("该图书已下架，不可再借出"));
+
+    // 3-pre) 惰性清理：借阅入口即触发该书"超时待取释放 + 队首顺延"（原仅 promoteNext 入口触发，
+    //        超时预约会一直占着副本卡住其他读者）。promoteNext 自带事务，须在本函数事务开启前调用；
+    //        尽力而为：无排队（3009）/无副本（3002）均属正常清理结果，失败忽略不影响借阅主流程。
+    //        若存在排队且顺延占用了本副本，随后的状态检查会给出 3002（排队优先，符合预约语义）。
+    if (copyStatus0 == QStringLiteral("reserved")) {
+        ReservationService resv(m_db, m_copies, m_eligibility);
+        resv.promoteNext(op, copy0.value(QStringLiteral("book_id")).toLongLong());
+        // 释放/顺延可能改变副本状态（reserved→available 或被顺延占用），重新拉取最新状态
+        Result cr2 = m_copies->getCopyByBarcode(op, barcode);
+        if (cr2.ok())
+            copy = cr2.data;
+    }
+    const QString copyStatus = copy.value(QStringLiteral("status")).toString().toLower();
 
     qint64 pickupResvId = 0;   // 预约取书分支：该副本对应的 ready_to_pick 预约
     if (copyStatus == QStringLiteral("reserved")) {
@@ -233,6 +249,22 @@ Result BorrowService::listLoans(const OperatorContext& op, const QVariantMap& fi
 
     QStringList where;
     QVariantList binds;
+
+    // 权限口径：Reader 强制限定本人借阅记录（忽略请求传入的 reader_id 等筛选越权尝试）；
+    // user_id 未绑定读者的 Reader 视为本人范围为空，返回空列表。
+    if (op.role == Role::Reader) {
+        QSqlQuery rq(m_db);
+        rq.prepare(QStringLiteral("SELECT id FROM readers WHERE user_id = ?"));
+        rq.addBindValue(op.userId);
+        if (!rq.exec())
+            return Result::fail(ErrorCode::DbError,
+                                QStringLiteral("查询读者身份失败: %1").arg(rq.lastError().text()));
+        if (!rq.next())
+            return Result::success();   // 本人范围为空
+        where << QStringLiteral("l.reader_id = ?");
+        binds << rq.value(0).toLongLong();
+    }
+
     const QVariant readerId = filter.value(QStringLiteral("reader_id"));
     if (readerId.isValid() && readerId.toLongLong() > 0) {
         where << QStringLiteral("l.reader_id = ?");
